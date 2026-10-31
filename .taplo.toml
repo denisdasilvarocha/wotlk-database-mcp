@@ -1,0 +1,12 @@
+include = ["**/*.toml"]
+exclude = ["target/**"]
+
+[formatting]
+column_width = 120
+
+[[rule]]
+include = ["**/Cargo.toml"]
+keys = ["dependencies", "dev-dependencies", "lints.rust", "lints.clippy"]
+
+[rule.formatting]
+reorder_keys = true

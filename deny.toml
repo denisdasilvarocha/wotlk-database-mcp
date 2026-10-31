@@ -1,0 +1,27 @@
+# cargo-deny: security advisories, licenses, banned crates, and dependency sources.
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+# Every ignored advisory needs a reason: { id = "RUSTSEC-YYYY-NNNN", reason = "..." }
+ignore = []
+
+[licenses]
+# Add a license only after you check that it is compatible with this project.
+allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+confidence-threshold = 0.93
+
+[licenses.private]
+# This crate is not published (`publish = false`), so it needs no license of its own.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-git = "deny"
+unknown-registry = "deny"
