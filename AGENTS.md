@@ -16,6 +16,7 @@ World of Warcraft: Wrath of the Lich King database. It uses the official Rust SD
 | `src/lib.rs`              | Library root: module declarations and public re-exports.                |
 | `src/server.rs`           | `WotlkServer`: MCP tools (`#[tool_router]`) and `ServerHandler`.        |
 | `tests/server.rs`         | End-to-end tests: real MCP client against the server, in memory.        |
+| `docs/spec/`              | Feature specs. Read the matching spec before you implement a feature.   |
 | `justfile`                | All development commands. Hooks and CI call these recipes.             |
 | `.pre-commit-config.yaml` | Git hooks (run by `prek`).                                              |
 | `Cargo.toml` `[lints]`    | Compiler and clippy lint levels.                                        |
