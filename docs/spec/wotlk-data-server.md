@@ -4,25 +4,13 @@ Status: ready-for-agent
 
 ## Problem Statement
 
-AI agents that write client-side tooling for World of Warcraft 3.3.5a (build 12340) need three kinds of
-reference data: native client offsets, the Lua API, and game data (items, creatures, spells, item sets,
-quests, and related records). Today this data is in many places: a skill catalog in Markdown, a
-third-party Lua API dataset, a TrinityCore world database dump, client DBC files, and web databases such
-as Rising Gods. An agent must search the web, parse HTML, or guess. The answers are slow, use many
-tokens, change between calls, and are often for the wrong client build. Unverified offsets look the same
-as verified ones, so agents can treat a wrong address as confirmed.
+AI agents that write client-side tooling for World of Warcraft 3.3.5a (build 12340) need three kinds of reference data: native client offsets, the Lua API, and game data (items, creatures, spells, item sets, quests, and related records). Today this data is in many places: a skill catalog in Markdown, a third-party Lua API dataset, a TrinityCore world database dump, client DBC files, and web databases such as Rising Gods. An agent must search the web, parse HTML, or guess. The answers are slow, use many tokens, change between calls, and are often for the wrong client build. Unverified offsets look the same as verified ones, so agents can treat a wrong address as confirmed.
 
 ## Solution
 
-A private, offline MCP server that answers from one read-only SQLite database. A separate offline builder
-makes that database from a TrinityCore TDB 335 dump, an enUS 12340 DBC folder, a vendored copy of the
-offsets catalog, and a vendored, pinned copy of the milkyway-codex Lua API data. A bootstrap command
-downloads and caches pinned TDB and community DBC inputs when needed. The database is tracked with Git LFS.
+A private, offline MCP server that answers from one read-only SQLite database. A separate offline builder makes that database from a TrinityCore TDB 335 dump, an enUS 12340 DBC folder, a vendored copy of the offsets catalog, and a vendored, pinned copy of the milkyway-codex Lua API data. A bootstrap command downloads and caches pinned TDB and community DBC inputs when needed. The database is tracked with Git LFS.
 
-Agents use four generic tools: `search`, `get`, `related`, and `sql`. Every tool returns compact
-`key=value` text. Fields that are zero, empty, or default are left out. Flags and enums are decoded to
-names. Spell descriptions come with simple tokens resolved. Each offset carries an explicit verification
-status. The data is "Blizzlike": the client DBC is the truth, and the TDB supplies only server-side data.
+Agents use four generic tools: `search`, `get`, `related`, and `sql`. Every tool returns compact `key=value` text. Fields that are zero, empty, or default are left out. Flags and enums are decoded to names. Spell descriptions come with simple tokens resolved. Each offset carries an explicit verification status. The data is "Blizzlike": the client DBC is the truth, and the TDB supplies only server-side data.
 
 ## User Stories
 
