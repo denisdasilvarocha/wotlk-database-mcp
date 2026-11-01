@@ -6,7 +6,7 @@ The server provides local reference data for World of Warcraft 3.3.5a, client bu
 
 The builder converts local source files into one SQLite database. The server reads that database and answers Model Context Protocol (MCP) requests over standard input and standard output.
 
-The server does not connect to a game client or a game server. It does not fetch data at runtime. Build scripts can download inputs before the builder runs.
+The server does not connect to a game client or a game server. It can download a database release into the user cache. Build scripts can download inputs before the builder runs.
 
 ## Components
 
@@ -14,10 +14,13 @@ The database separates source import from MCP requests. The client exchanges JSO
 
 ```mermaid
 flowchart LR
-  accTitle: Offline database build and MCP runtime
-  accDescr: Local source inputs enter the builder. The builder writes SQLite. The server reads SQLite and exchanges JSON-RPC messages with an MCP client over stdio.
+  accTitle: Database build, distribution, and MCP runtime
+  accDescr: The builder writes SQLite. A release can supply the user cache. The server reads a local database and answers MCP requests over stdio.
   inputs["TDB, DBC, offsets, and Lua API files"] -->|import| builder["wotlk-db-builder"]
   builder -->|write| database[("data/wotlk.sqlite")]
+  database -->|publish compressed asset| release["GitHub Release"]
+  release -->|download and verify| cache[("User cache")]
+  cache -->|read only| server
   database -->|read only| server["wotlk-database-mcp"]
   server <-->|"JSON-RPC over stdio"| client["MCP client"]
 ```
@@ -48,6 +51,12 @@ The builder writes a `.partial` file beside the output. It replaces the output a
 
 At runtime, the server opens one read-only connection. A mutex serializes database access. The server sends query work to `tokio::task::spawn_blocking` so synchronous SQLite calls run outside async tasks.
 
+The server selects `--db`, then `WOTLK_DB`, then the cache for schema version 1. Explicit paths never download. The server checks `meta.schema_version` before it accepts a database.
+
+On a cache miss, the server completes the handshake before it downloads the release asset. Its database state is loading, ready, or failed. Tools report download progress while loading. After verification, tools use the database without a restart. Download failures become tool errors with recovery steps.
+
+The download process locks the cache, checks it again, and decompresses into a temporary file. It verifies the decompressed file against the SHA-256 checksum embedded in the binary. It syncs the file and renames it to the final cache path. Concurrent processes share the same lock.
+
 ## Data sources and pins
 
 The DBC files define client data. TDB supplies world and server-side data that the DBC files do not provide.
@@ -65,7 +74,7 @@ Spells come from the DBC files, not from TDB `spell_dbc`. Items use TDB `item_te
 
 The builder checks DBC layouts and requires spell 133 to have the enUS name `Fireball`. These checks detect incompatible inputs. They do not prove Blizzard provenance. Archive hashes detect changes to the pinned downloads, not their original source.
 
-The database stores the client build, TDB release, dump hash, API commit, offsets snapshot date, and builder version in `meta`.
+The database stores the schema version, client build, TDB release, dump hash, API commit, offsets snapshot date, and builder version in `meta`.
 
 ## TDB parser rules
 
@@ -87,7 +96,7 @@ The builder reads the SQL dump as a stream. It does not execute the dump or requ
 
 ## Decisions and constraints
 
-The offline database keeps runtime requests independent of source services. Data changes require a database rebuild, rather than a runtime fetch.
+The local database keeps queries independent of source services after the first download. Data changes require a database rebuild and a matching release asset, not live source queries.
 
 The server uses SQLite read-only open flags and enables `query_only`. Its authorizer blocks transaction control, database attachment, and disallowed pragma assignments. These controls protect the database connection. They do not isolate the process from the host operating system.
 

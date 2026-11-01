@@ -4,13 +4,13 @@ This page defines runtime and database-build settings for server 0.1.0. The data
 
 ## Sources
 
-The server reads a command-line database path, environment variables, and a compiled-in database path. The database build script reads its input settings from environment variables.
+The server reads a command-line database path, environment variables, and the user cache. The database build script reads its input settings from environment variables.
 
 | Source | Scope | Behavior |
 | --- | --- | --- |
-| `--db` command-line option | Server database path | Overrides `WOTLK_DB` and the compiled-in path. |
-| `WOTLK_DB` environment variable | Server database path | Used only when the command line has no arguments. |
-| Compiled-in path | Server database path | Used when neither database override is present. |
+| `--db` command-line option | Server database path | Overrides `WOTLK_DB` and the cache. |
+| `WOTLK_DB` environment variable | Server database path | Used when `--db` is absent. |
+| User cache | Server database path | Used when neither override is present. |
 | `RUST_LOG` environment variable | Server logging | Sets the tracing filter. |
 | Build environment variables | Database input archives | Override the defaults in `scripts/build_db.sh`. |
 
@@ -18,41 +18,58 @@ The server has no configuration file or authentication setting.
 
 ## Database path precedence
 
-The server selects `--db` first, then `WOTLK_DB`, then the compiled-in path. An invalid selected path causes an error. It does not fall back to another source.
+The server selects `--db` first, then `WOTLK_DB`, then the schema-version cache. An invalid explicit path causes an error that names the path. Explicit paths never trigger a download or fall back to the cache.
 
 ```mermaid
 flowchart TD
   accTitle: Database path selection
-  accDescr: The server uses the command-line database path first, then WOTLK_DB, then the compiled-in path.
+  accDescr: The server uses the command-line database path first, then WOTLK_DB, then the user cache.
   cli{"--db path supplied?"} -->|Yes| explicit["Use --db path"]
-  cli -->|No arguments| env{"WOTLK_DB set?"}
+  cli -->|No| env{"WOTLK_DB set?"}
   env -->|Yes| variable["Use WOTLK_DB"]
-  env -->|No| compiled["Use compiled-in path"]
+  env -->|No| cache["Use schema-version cache"]
 ```
 
-The compiled-in path is `CARGO_MANIFEST_DIR/data/wotlk.sqlite`. Here, `CARGO_MANIFEST_DIR` is the source directory at compilation time. It is not the current working directory or the executable directory.
+The cache path ends with `wotlk-database-mcp/schema-1/wotlk.sqlite` under the platform cache directory. See [cache locations](../install.md#2-download-the-database) for each OS. The server does not use a path from the source checkout unless you select it explicitly.
 
 ## Runtime settings
 
-The command-line form is `wotlk-database-mcp [--db <path>]`. The `<path>` value is the database file path.
+The server accepts these command-line forms. Replace `<path>` with the database file path.
+
+```text
+wotlk-database-mcp [--db <path>]
+wotlk-database-mcp fetch
+```
 
 | Name | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `--db <path>` | Path argument | No | `WOTLK_DB`, then the compiled-in path | Selects an existing database file. |
-| `WOTLK_DB` | Environment path | No | Compiled-in path | Selects the database when no command-line arguments are present. |
+| `--db <path>` | Path argument | No | `WOTLK_DB`, then cache | Selects an existing database file. |
+| `WOTLK_DB` | Environment path | No | Cache | Selects the database when `--db` is absent. |
 | `RUST_LOG` | Environment string | No | `INFO` filter directive | Sets the tracing log filter. |
+| `HTTPS_PROXY` or `https_proxy` | Environment URL | No | No explicit proxy | Sets the proxy for database downloads. |
 
-`--db` requires exactly one path argument. Unknown flags, missing paths, and extra arguments fail with `usage: wotlk-database-mcp [--db <path>]`. The server has no `--help` option.
+`--db` requires exactly one path argument. Unknown flags, missing paths, and extra arguments fail with this usage text:
+
+```text
+usage: wotlk-database-mcp [--db <path>] | wotlk-database-mcp fetch
+```
+
+`fetch` downloads and verifies the cached database. It reports progress on stderr and exits with code 0 on success. It exits non-zero on failure. A valid cache needs no download.
 
 Relative paths resolve from the server process's working directory. An empty `WOTLK_DB` counts as a selected value and fails the file check.
 
-The server requires a file at the selected path. It opens the database read-only and reads the `client_build` entry from `meta` during startup.
+The server opens the database read-only. It requires `meta.schema_version` to equal `1`, including for explicit paths. A missing version produces `expected schema version 1, found none`. A different version produces `expected schema version 1, found <x>`, where `<x>` is the stored value.
+
+With no valid cache, the server answers the handshake and lists tools before it downloads the database. During the download, tool errors give a percentage and tell the caller to retry. After the database is ready, tools work without a restart.
+
+If download or verification fails, tool errors include the cause, asset URL, `npx wotlk-database-mcp fetch`, and the `WOTLK_DB` manual-download option. A build without an embedded checksum cannot download. It still serves the handshake and tool list. Use an explicit database or a valid cache.
 
 | Startup error | Caller action |
 | --- | --- |
-| `usage: wotlk-database-mcp [--db <path>]` | Supply no arguments, or supply `--db` followed by one path. |
+| `usage: wotlk-database-mcp [--db <path>] \| wotlk-database-mcp fetch` | Supply no arguments, `--db` with one path, or `fetch`. |
 | `database file not found: PATH (pass --db <path> or set WOTLK_DB)` | Select an existing database file. See [Installation](../install.md). |
 | `cannot open database PATH` | Check file access and the SQLite error. Use a database that contains build metadata. |
+| `expected schema version 1, found ...` | Run `just build-db` or download schema version 1. |
 
 ## Logging
 
