@@ -133,6 +133,15 @@ impl<R: BufRead> Lexer<R> {
         String::from_utf8(bytes).map_err(|e| error(line, format!("invalid UTF-8: {e}")))
     }
 
+    fn skip_line_comment(&mut self) -> Result<(), BuildError> {
+        while let Some(b) = self.byte()? {
+            if b == b'\n' {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     fn next_token(&mut self) -> Result<Option<(Token, u64)>, BuildError> {
         if self.lookahead.is_some() {
             return Ok(self.lookahead.take());
@@ -144,20 +153,10 @@ impl<R: BufRead> Lexer<R> {
             let line = self.line - u64::from(b == b'\n');
             match b {
                 b if b.is_ascii_whitespace() => {}
-                b'#' => {
-                    while let Some(c) = self.byte()? {
-                        if c == b'\n' {
-                            break;
-                        }
-                    }
-                }
+                b'#' => self.skip_line_comment()?,
                 b'-' if self.peek_byte()? == Some(b'-') => {
                     self.byte()?;
-                    while let Some(c) = self.byte()? {
-                        if c == b'\n' {
-                            break;
-                        }
-                    }
+                    self.skip_line_comment()?;
                 }
                 b'/' if self.peek_byte()? == Some(b'*') => {
                     self.byte()?;
@@ -226,6 +225,16 @@ impl<R: BufRead> Lexer<R> {
         token.name().ok_or_else(|| error(line, "expected identifier"))
     }
 
+    /// Consumes a list separator and reports whether `)` ended the list.
+    fn comma_or_closing_paren(&mut self) -> Result<bool, BuildError> {
+        let (token, line) = self.next()?;
+        match token {
+            Token::Symbol(b',') => Ok(false),
+            Token::Symbol(b')') => Ok(true),
+            _ => Err(error(line, "expected comma or closing parenthesis")),
+        }
+    }
+
     fn skip_statement(&mut self) -> Result<(), BuildError> {
         loop {
             match self.next_token()? {
@@ -271,22 +280,25 @@ impl Row<'_> {
             .ok_or_else(|| error(self.line, format!("missing value for {name}")))
     }
 
-    pub(crate) fn int(&self, name: &str) -> Result<i64, BuildError> {
+    /// Parses a numeric column: text and number cells are parsed, nulls become the numeric zero.
+    fn number<T>(&self, name: &str, kind: &str) -> Result<T, BuildError>
+    where
+        T: std::str::FromStr + Default,
+    {
         match self.value(name)? {
             Value::Number(value) | Value::Text(value) => value
                 .parse()
-                .map_err(|_| error(self.line, format!("invalid integer in {name}: {value}"))),
-            Value::Null => Ok(0),
+                .map_err(|_| error(self.line, format!("invalid {kind} in {name}: {value}"))),
+            Value::Null => Ok(T::default()),
         }
     }
 
+    pub(crate) fn int(&self, name: &str) -> Result<i64, BuildError> {
+        self.number(name, "integer")
+    }
+
     pub(crate) fn real(&self, name: &str) -> Result<f64, BuildError> {
-        match self.value(name)? {
-            Value::Number(value) | Value::Text(value) => value
-                .parse()
-                .map_err(|_| error(self.line, format!("invalid real in {name}: {value}"))),
-            Value::Null => Ok(0.0),
-        }
+        self.number(name, "real")
     }
 
     pub(crate) fn text(&self, name: &str) -> Result<Option<&str>, BuildError> {
@@ -295,6 +307,14 @@ impl Row<'_> {
             Value::Text(value) | Value::Number(value) => Ok((!value.is_empty()).then_some(value.as_str())),
         }
     }
+}
+
+fn push_unique_column(columns: &mut Vec<String>, column: String, line: u64) -> Result<(), BuildError> {
+    if columns.iter().any(|existing| existing.eq_ignore_ascii_case(&column)) {
+        return Err(error(line, format!("duplicate column {column}")));
+    }
+    columns.push(column);
+    Ok(())
 }
 
 fn validate_columns(name: &str, columns: &[String], required: &[&str], line: u64) -> Result<(), BuildError> {
@@ -352,13 +372,7 @@ fn create<R: BufRead>(
             let column = first
                 .name()
                 .ok_or_else(|| error(item_line, "expected column definition"))?;
-            if columns
-                .iter()
-                .any(|existing: &String| existing.eq_ignore_ascii_case(&column))
-            {
-                return Err(error(item_line, format!("duplicate column {column}")));
-            }
-            columns.push(column);
+            push_unique_column(&mut columns, column, item_line)?;
         }
         let mut depth = 0usize;
         loop {
@@ -391,10 +405,9 @@ fn insert<R: BufRead, F: FnMut(&str, &Row<'_>) -> Result<(), BuildError>>(
     callback: &mut F,
 ) -> Result<(), BuildError> {
     let (mut token, _) = lexer.next()?;
-    while token.keyword("LOW_PRIORITY")
-        || token.keyword("DELAYED")
-        || token.keyword("HIGH_PRIORITY")
-        || token.keyword("IGNORE")
+    while ["LOW_PRIORITY", "DELAYED", "HIGH_PRIORITY", "IGNORE"]
+        .iter()
+        .any(|keyword| token.keyword(keyword))
     {
         token = lexer.next()?.0;
     }
@@ -417,25 +430,16 @@ fn insert<R: BufRead, F: FnMut(&str, &Row<'_>) -> Result<(), BuildError>>(
             if !table.columns.iter().any(|known| known.eq_ignore_ascii_case(&column)) {
                 return Err(error(lexer.line, format!("unknown column {column} in {name}")));
             }
-            if explicit
-                .iter()
-                .any(|known: &String| known.eq_ignore_ascii_case(&column))
-            {
-                return Err(error(lexer.line, format!("duplicate column {column}")));
-            }
-            explicit.push(column);
-            let (separator, line) = lexer.next()?;
-            match separator {
-                Token::Symbol(b',') => {}
-                Token::Symbol(b')') => break,
-                _ => return Err(error(line, "expected comma or closing parenthesis")),
+            push_unique_column(&mut explicit, column, lexer.line)?;
+            if lexer.comma_or_closing_paren()? {
+                break;
             }
         }
         validate_columns(&name, &explicit, required, lexer.line)?;
     }
     let columns = if explicit.is_empty() { &table.columns } else { &explicit };
     let (values, line) = lexer.next()?;
-    if !values.keyword("VALUES") && !values.keyword("VALUE") {
+    if !["VALUES", "VALUE"].iter().any(|keyword| values.keyword(keyword)) {
         return Err(error(line, "expected VALUES"));
     }
     loop {
@@ -453,11 +457,8 @@ fn insert<R: BufRead, F: FnMut(&str, &Row<'_>) -> Result<(), BuildError>>(
                 _ => return Err(error(line, "invalid row value")),
             };
             row.push(value);
-            let (separator, line) = lexer.next()?;
-            match separator {
-                Token::Symbol(b',') => {}
-                Token::Symbol(b')') => break,
-                _ => return Err(error(line, "expected comma or closing parenthesis")),
+            if lexer.comma_or_closing_paren()? {
+                break;
             }
         }
         if row.len() != columns.len() {
