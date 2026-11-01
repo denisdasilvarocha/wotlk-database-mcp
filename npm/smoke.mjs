@@ -20,11 +20,19 @@ delete env.WOTLK_DB;
 
 const child = spawn(process.execPath, [launcher], { env, stdio: ['pipe', 'pipe', 'inherit'] });
 const send = message => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
-const timer = setTimeout(() => child.kill(), 30_000);
+const lines = createInterface({ input: child.stdout });
+let timedOut = false;
+const timer = setTimeout(() => {
+  timedOut = true;
+  lines.close();
+  // The native child can keep stdout open after its launcher exits.
+  child.stdout.destroy();
+  child.kill();
+}, 30_000);
 let tools;
 try {
   send({ id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'npm-smoke', version: '1.0.0' } } });
-  for await (const line of createInterface({ input: child.stdout })) {
+  for await (const line of lines) {
     const message = JSON.parse(line);
     if (message.id === 1) {
       send({ method: 'notifications/initialized' });
@@ -40,6 +48,7 @@ try {
   clearTimeout(timer);
   await rm(home, { recursive: true, force: true });
 }
+if (timedOut) throw new Error('MCP smoke timed out after 30 seconds');
 if (!tools?.some(tool => tool.name === 'search')) {
   throw new Error(`tools/list did not return the search tool: ${JSON.stringify(tools)}`);
 }
