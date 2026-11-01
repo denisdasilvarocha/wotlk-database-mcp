@@ -58,7 +58,8 @@ for (const [key, target] of Object.entries(targets)) {
       const archive = (await readdir(input)).find(file => file.includes(target) && /\.(tar\.xz|zip)$/.test(file));
       if (!archive) throw new Error(`Missing binary or dist archive for ${target} in ${input}`);
       if (archive.endsWith('.zip') && process.platform !== 'win32') run('unzip', ['-q', join(input, archive), '-d', temporary]);
-      else run('tar', ['-xf', join(input, archive), '-C', temporary]);
+      // Git Bash puts GNU tar first on PATH, which reads `D:\...` as a remote host; Windows' bsdtar also reads zip.
+      else run(process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar', ['-xf', join(input, archive), '-C', temporary]);
       source = await findBinary(temporary, binary);
       if (!source) throw new Error(`Missing ${binary} in ${basename(archive)}`);
     }
