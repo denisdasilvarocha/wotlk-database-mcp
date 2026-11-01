@@ -7,6 +7,9 @@ mod index;
 mod names;
 mod offsets;
 mod schema;
+#[expect(unreachable_pub, reason = "Shared schema constant is public for the server crate")]
+#[path = "../../src/schema_version.rs"]
+mod schema_version;
 mod tdb;
 
 use rusqlite::Connection;
@@ -145,6 +148,7 @@ fn populate(inputs: &Inputs, partial: &Path) -> Result<(), BuildError> {
             ("tdb_release", &world.release),
             ("tdb_sha256", &world.sha256),
             ("client_build", "12340"),
+            ("schema_version", &schema_version::SCHEMA_VERSION.to_string()),
             ("codex_commit", &commit),
             ("offsets_copied", &copied),
             ("builder_version", env!("CARGO_PKG_VERSION")),

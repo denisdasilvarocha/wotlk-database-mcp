@@ -11,8 +11,13 @@ ignore = []
 
 [licenses]
 # Add a license only after you check that it is compatible with this project.
-allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+allow = ["Apache-2.0", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "MIT", "Unicode-3.0"]
 confidence-threshold = 0.93
+
+# File-level copyleft; the unmodified crate source is available on crates.io.
+[[licenses.exceptions]]
+crate = "option-ext"
+allow = ["MPL-2.0"]
 
 [licenses.private]
 # This crate is not published (`publish = false`), so it needs no license of its own.

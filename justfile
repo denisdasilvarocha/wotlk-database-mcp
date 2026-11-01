@@ -49,11 +49,11 @@ check:
 
 # Run the server on stdio.
 run:
-    cargo run --locked
+    cargo run --locked -- --db data/wotlk.sqlite
 
 # Open the server in the MCP Inspector (needs Node.js).
 inspect:
-    npx @modelcontextprotocol/inspector cargo run --quiet --locked
+    npx @modelcontextprotocol/inspector cargo run --quiet --locked -- --db data/wotlk.sqlite
 
 # Prepare vendored inputs, build the database, and compile the release server.
 build: vendor-offsets vendor-api build-db
