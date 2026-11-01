@@ -28,7 +28,7 @@
 - [x] 5.1 Initialize dist for the five targets with GitHub Release archives only (npm installer disabled), and verify that `dist plan` lists the five targets
 - [ ] 5.2 Add a `db-release` workflow that compresses `data/wotlk.sqlite` with zstd, uploads it with its sha256 to the `db-schema<N>` release, and verify that the asset downloads and the hash matches
 - [ ] 5.3 Embed the database URL and the sha256 in release builds, and verify that a release binary downloads `db-schema1` successfully with `fetch`
-- [ ] 5.4 Add the npm launcher package (bin script, `optionalDependencies` at the exact version, unsupported-platform message) and the platform package template, and verify on each OS in CI with `npm install --ignore-scripts` from packed tarballs, then run the server and list its tools
+- [x] 5.4 Add the npm launcher package (bin script, `optionalDependencies` at the exact version, unsupported-platform message) and the platform package template, and verify on each OS in CI with `npm install --ignore-scripts` from packed tarballs, then run the server and list its tools
 - [x] 5.5 Add the publish job to the release workflow: publish platform packages first and the launcher last. Verify that `npm pack --dry-run` shows no `.sqlite` file in any package
 - [ ] 5.6 Publish placeholder versions of all six package names, and verify that each name shows on npmjs.com under the owner account
 
