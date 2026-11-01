@@ -14,10 +14,10 @@ as verified ones, so agents can treat a wrong address as confirmed.
 
 ## Solution
 
-A private, offline MCP server that answers from one read-only SQLite database. A separate builder makes
-that database from pinned, local inputs: a TrinityCore TDB 335 dump, an enUS 12340 DBC folder, a vendored
-copy of the offsets catalog, and a vendored, pinned copy of the milkyway-codex Lua API data. The database
-is committed to the repository with Git LFS.
+A private, offline MCP server that answers from one read-only SQLite database. A separate offline builder
+makes that database from a TrinityCore TDB 335 dump, an enUS 12340 DBC folder, a vendored copy of the
+offsets catalog, and a vendored, pinned copy of the milkyway-codex Lua API data. A bootstrap command
+downloads and caches pinned TDB and community DBC inputs when needed. The database is tracked with Git LFS.
 
 Agents use four generic tools: `search`, `get`, `related`, and `sql`. Every tool returns compact
 `key=value` text. Fields that are zero, empty, or default are left out. Flags and enums are decoded to
@@ -84,7 +84,7 @@ status. The data is "Blizzlike": the client DBC is the truth, and the TDB suppli
 56. As an agent, I want to see which inputs built the database (TDB release, dump hash, client build, codex commit, offsets copy date, builder version), so that I know where the data came from.
 57. As an agent, I want the same answer every time for the same question, so that I can trust and cache results.
 58. As an agent, I want answers in milliseconds without network access, so that queries do not slow down my work.
-59. As the maintainer, I want to rebuild the database with one command from local inputs, so that updating the data is easy.
+59. As the maintainer, I want to rebuild the database with one command that provisions its inputs, so that updating the data is easy.
 60. As the maintainer, I want the builder to check that the DBC folder is for build 12340 and enUS, so that I do not build from the wrong client by mistake.
 61. As the maintainer, I want the builder to read the TDB dump directly without a MySQL server, so that the build has no service dependencies.
 62. As the maintainer, I want the build to fail with a clear message when an input is missing or malformed, so that I never commit a partial database.
@@ -110,21 +110,27 @@ status. The data is "Blizzlike": the client DBC is the truth, and the TDB suppli
   - an offsets catalog parser.
   - a codex JSON importer.
   - a search index writer and a meta writer.
-- A `just build-db` recipe runs the builder with `--tdb <dump file>` and `--dbc <folder>`. The vendored offsets and codex data have fixed locations in the repository.
+- The zero-argument `just build` validates the bundled offsets, vendors the API at the commit in `builder/vendor/api/COMMIT`, builds the database, and builds the release server with Cargo's lockfile.
+- The zero-argument `just build-db` provisions pinned inputs and invokes the offline builder with `--tdb <dump file>` and `--dbc <folder>`. The vendored offsets and codex data have fixed locations in the repository.
+- Database bootstrap requires Bash, curl, `jq`, Cargo, `bsdtar`, `unzip`, and a SHA-256 utility; it fetches the codex through Git LFS if it is a pointer. It does not install packages. The cache under `target/build-db` verifies archives and extracted files and repairs corrupted entries.
+- `just setup` installs missing tools on macOS with Homebrew, Linux with apt, dnf, or pacman, and native x86_64 Windows from MSYS2 Bash with pacman. macOS requires Xcode Command Line Tools. Native Windows requires Microsoft C++ Build Tools with MSVC and a Windows SDK; cmd, PowerShell, and Git Bash alone are not the native Windows environment. WSL follows the Linux instructions and produces a Linux binary. Setup installs the pinned Rust toolchain and configures Git LFS and prek hooks.
 
 ### Inputs and source precedence
 
-- The world data comes from TrinityCore TDB 335, pinned to release 335.26091. The dump stays outside git.
-- The client data comes from a pre-extracted enUS 12340 DBC folder. The folder stays outside git.
+- The world data comes from TrinityCore TDB 335, pinned to release 335.26091. The bootstrap downloads its release archive; the dump stays outside git.
+- The client data comes from the pinned community [wowgaming/client-data v20.0 `Data.zip`](https://github.com/wowgaming/client-data/releases/tag/v20.0). The bootstrap extracts its DBC files, not its maps; the folder stays outside git.
+- SHA-256 checks pin the downloaded artifacts and detect corruption. They do not independently establish Blizzard provenance. Source URLs and hashes are recorded in `scripts/build_db.sh`.
 - Only enUS text is stored. `wow_dbc` names the first English string field `en_gb`. The builder reads that field and checks that it holds enUS text.
-- The builder checks the DBC folder for build 12340 by the expected record counts and layouts, and stops with an error when they do not match.
+- The builder checks DBC layouts and verifies that Spell record 133 has the enUS name `Fireball`. It does not check record counts.
 - Precedence ("client truth, TDB for server-only data"):
   - Spells come only from `Spell.dbc` and its helper DBCs (durations, radii, ranges, cast times, icons). The server-only rows in the TDB `spell_dbc` table are ignored.
   - Items take their stats from `item_template`. `Item.dbc` fills only class and display ID, and only for items that `item_template` does not have.
   - Creatures, quests, loot, spawns, vendors, and trainers come only from the TDB. Trainers use the current TrinityCore trainer tables (`trainer`, `trainer_spell`, `creature_default_trainer`). There is no `npc_trainer` table.
+  - Negative `npc_vendor.item` values refer to another vendor's stock. Expand these references, including nested references, before storing vendor items.
+  - Item spell IDs at or below zero mean no spell. Do not store these slots.
   - Maps, areas, factions, talents, talent tabs, skill lines, glyphs, achievements, item sets, item display info, and spell icons come only from the DBCs.
-- The offsets come from a vendored copy of the wow-335-offsets skill catalog: 787 Windows x86 entries in 12 domain files. To update them, copy the files again.
-- The Lua API comes from the upstream `Shard-MW/milkyway-codex`, pinned to a commit and vendored. All categories are in scope: functions, events, widgets, CVars, types, combat-log events, and secure templates.
+- The offsets come from the checked-in wow-335-offsets catalog: 787 Windows x86 entries in 12 domain files. The default deliberately uses this bundled catalog and does not require a local agent skill. `just vendor-offsets` validates it; `just vendor-offsets <src>` refreshes it from a reference folder.
+- The Lua API comes from the upstream `Shard-MW/milkyway-codex`, pinned to a commit and vendored. `just vendor-api` uses `builder/vendor/api/COMMIT`; an optional commit changes the pin. The checkout is cached under `target/api`. All categories are in scope: functions, events, widgets, CVars, types, combat-log events, and secure templates.
 
 ### Data scope
 
@@ -164,8 +170,8 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
   - gameobject: `loot`, `spawns`. area: `children`, `parent`. faction: `members`. achievement: `criteria`.
 - `sql(query, limit?)`: one read-only statement only. Default 200 rows, maximum 1000. A progress handler stops the query after 2 seconds. When rows are cut, the output says so.
 - Kinds: item, creature, spell, itemset, quest, gameobject, map, area, faction, talent, skill, glyph, achievement, offset, lua_function, lua_event, widget, cvar, lua_type, combatlog_event, secure_template, and `meta`.
-- The schema is available to the agent, so it can write SQL without guessing.
-- Output is compact `key=value` text, never JSON structured output, because many clients then get the same data twice.
+- The builder includes a comment for every column in each `CREATE TABLE` statement. Agents read the schema with `SELECT sql FROM sqlite_schema WHERE type = 'table'`.
+- The `sql` tool returns a tab-separated header and rows, with `NULL` for null values. Other tools return compact `key=value` text, never JSON structured output.
 - Errors follow the project rule. An unknown kind, an unknown relation, or a malformed SQL statement is `invalid_params`. A missing ID, an empty result, or an SQL runtime error is a tool error result that the model can read.
 - The server `instructions` text lists every kind and relation, so agents need no discovery call.
 
@@ -176,8 +182,8 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 
 ## Testing Decisions
 
-- One test seam: fixture sources go through the builder library entry point into a temporary SQLite file. Then a real `rmcp` client, connected over an in-memory duplex transport, calls the tools, and the test checks the text output.
-- Good tests check only behavior that an agent can see through the MCP tools. They do not check internal functions, table layouts, or source text. You can change the tokenizer, decoders, resolver, and index internals freely if tool output stays the same.
+- Fixture sources go through the builder library entry point into a temporary SQLite file. A real `rmcp` client, connected over an in-memory duplex transport, calls the tools and checks their text output.
+- Offline Bash tests cover input provisioning separately and use `zip` to create archive fixtures. CI uses fixtures and does not download the large source artifacts.
 - The fixtures are small and committed: a few TDB `CREATE TABLE` and `INSERT` statements, including hard MySQL escapes (quotes, backslashes, `NULL`, empty strings, multi-row inserts); a few small DBC files; an offsets Markdown snippet with each caveat marker; and a codex JSON snippet.
 - These parts are covered only through the seam:
   - the dump tokenizer: names with escaped quotes come back correctly through `search` and `get`.
@@ -200,8 +206,8 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 - Locales other than enUS.
 - Data for a specific server, for example Rising Gods custom fixes. Scraping db.rising-gods.de is out of scope.
 - The TDB `spell_dbc` server-only spells and other server overrides of client data.
-- Network access at runtime, an online fallback, and automatic download of the TDB.
-- Reading MPQ archives directly. The builder needs an extracted DBC folder.
+- Network access at server runtime and an online fallback.
+- Reading MPQ archives directly. The offline builder needs an extracted DBC folder.
 - A full spell formula evaluator (`${...}` expressions and `$l`/`$g` conditionals).
 - JSON structured output.
 - Public release of the data. The repository is private, and the committed database contains Blizzard-derived and GPL data.

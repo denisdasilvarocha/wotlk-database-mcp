@@ -17,13 +17,65 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            shell: bash
+          - os: macos-latest
+            shell: bash
+          - os: windows-latest
+            shell: msys2 {0}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          install: bash curl jq bsdtar coreutils unzip zip mingw-w64-ucrt-x86_64-git-lfs
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools jq shellcheck unzip zip
+      - if: runner.os == 'macOS'
+        run: brew install jq shellcheck
       # Installs the toolchain pinned in rust-toolchain.toml.
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: just,prek,taplo,cargo-deny,cargo-shear
+      - run: just setup
+      - run: for file in scripts/*.sh tests/test_build_db.sh; do bash -n "$file"; done
+      - if: runner.os != 'Windows'
+        run: shellcheck scripts/*.sh tests/test_build_db.sh
       - run: just check
+      - name: Build with local fixture inputs
+        run: |
+          # Override source pins only for this fixture build; production pins are unchanged.
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          bsdtar --format=7zip -cf "$work/world.7z" -C tests/fixtures tdb.sql
+          bsdtar --format=zip -cf "$work/data.zip" -C target/tmp/server-fixture dbc
+          sha() {
+            if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1
+            else shasum -a 256 "$1" | cut -d ' ' -f 1; fi
+          }
+          export TDB_URL="file://$work/world.7z" TDB_SHA256="$(sha "$work/world.7z")" TDB_MEMBER=tdb.sql
+          export DBC_URL="file://$work/data.zip" DBC_SHA256="$(sha "$work/data.zip")" DBC_MEMBER=dbc
+          just build
+      - name: Start release server with fixture database
+        run: |
+          binary=target/release/wotlk-database-mcp
+          if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
+          response=$(mktemp)
+          trap 'rm -f "$response"' EXIT
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci-smoke","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' |
+            "$binary" --db data/wotlk.sqlite > "$response"
+          jq -e 'select(.id == 1) | .result.serverInfo.name == "wotlk-database-mcp"' "$response"

@@ -1,0 +1,2 @@
+data/wotlk.sqlite filter=lfs diff=lfs merge=lfs -text
+builder/vendor/api/codex.json filter=lfs diff=lfs merge=lfs -text

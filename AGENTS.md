@@ -15,11 +15,13 @@ World of Warcraft: Wrath of the Lich King database. It uses the official Rust SD
 | `src/main.rs`             | Binary entry point: logging setup, stdio transport. Keep it thin.       |
 | `src/lib.rs`              | Library root: module declarations and public re-exports.                |
 | `src/server.rs`           | `WotlkServer`: MCP tools (`#[tool_router]`) and `ServerHandler`.        |
-| `tests/server.rs`         | End-to-end tests: real MCP client against the server, in memory.        |
+| `builder/`                | Workspace crate that builds the SQLite database from TDB, DBC, and vendored inputs. |
+| `tests/server.rs`         | End-to-end MCP tests using a fixture database.                           |
+| `tests/builder.rs`        | Builder tests using fixture inputs; no real game data is required.       |
 | `docs/spec/`              | Feature specs. Read the matching spec before you implement a feature.   |
 | `justfile`                | All development commands. Hooks and CI call these recipes.             |
 | `.pre-commit-config.yaml` | Git hooks (run by `prek`).                                              |
-| `Cargo.toml` `[lints]`    | Compiler and clippy lint levels.                                        |
+| `Cargo.toml` `[workspace.lints]` | Compiler and clippy lint levels shared by the workspace.          |
 | `clippy.toml`             | Clippy settings (test exemptions, accepted proper nouns).               |
 | `rustfmt.toml`            | Formatter settings (stable options only).                               |
 | `.taplo.toml`             | TOML formatter settings.                                                |
@@ -35,15 +37,19 @@ Run every command from the repository root.
 | `just fmt`       | Format Rust and TOML files. Run after every edit.                            |
 | `just lint`      | Clippy with `-D warnings`.                                                   |
 | `just fix`       | Apply automatic clippy fixes, then format.                                   |
-| `just test`      | All tests. Filter one test: `cargo test --all-features <name>`.              |
+| `just test`      | Workspace tests and offline Bash provisioning tests. Filter Rust tests: `cargo test --all-features <name>`. |
 | `just doc`       | Build docs with `-D warnings`.                                               |
 | `just deps`      | `cargo deny` (advisories, licenses, sources) and `cargo shear` (unused deps). |
-| `just check`     | Every gate above plus file hygiene. CI runs exactly this.                    |
+| `just check`     | Every gate above plus file hygiene. CI also checks Bash scripts and the release binary. |
 | `just run`       | Run the server on stdio.                                                     |
 | `just inspect`   | Open the server in the MCP Inspector (needs Node.js).                        |
+| `just setup` | Install required tools and configure Git LFS and prek hooks; see README for prerequisites. |
+| `just build` | Validate bundled offsets, vendor the pinned API, build the database, and build the release server. |
+| `just build-db` | Download or reuse pinned inputs and build `data/wotlk.sqlite`; see README for prerequisites. |
+| `just vendor-offsets [src]` | Validate the bundled catalog, or replace it from the supplied reference folder. |
+| `just vendor-api [commit]` | Export the API at the bundled pin, or update it to the supplied commit. |
 
-Required tools: `rustup`, `just`, `prek`, `taplo`, `cargo-deny`, `cargo-shear`.
-On macOS: `brew install just prek taplo cargo-deny cargo-shear`. Then run `just setup` once.
+See `README.md` for setup, database inputs, and server path precedence.
 
 ## Definition of done
 

@@ -6,7 +6,14 @@ column_width = 120
 
 [[rule]]
 include = ["**/Cargo.toml"]
-keys = ["dependencies", "dev-dependencies", "lints.rust", "lints.clippy"]
+keys = [
+  "dependencies",
+  "dev-dependencies",
+  "lints.rust",
+  "lints.clippy",
+  "workspace.lints.rust",
+  "workspace.lints.clippy",
+]
 
 [rule.formatting]
 reorder_keys = true

@@ -1,12 +1,14 @@
 # Single entry point for every development command. Git hooks and CI call these recipes.
 
+set shell := ["bash", "scripts/shell.sh"]
+
 # List all recipes.
 _default:
     @just --list
 
-# Install the git hooks (pre-commit and pre-push).
+# Install missing tools and the git hooks.
 setup:
-    prek install
+    bash scripts/setup.sh
 
 # Format Rust and TOML files in place.
 fmt:
@@ -20,20 +22,21 @@ fmt-check:
 
 # Run clippy. Any warning fails.
 lint:
-    cargo clippy --all-targets --all-features --locked -- -D warnings
+    cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 # Apply automatic clippy fixes, then format.
 fix:
-    cargo clippy --fix --allow-dirty --allow-staged --all-targets --all-features
+    cargo clippy --workspace --fix --allow-dirty --allow-staged --all-targets --all-features
     just fmt
 
 # Run unit, integration, and doc tests.
 test:
-    cargo test --all-features --locked
+    cargo test --workspace --all-features --locked
+    bash tests/test_build_db.sh
 
 # Build the API docs. Any rustdoc warning fails.
 doc:
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 
 # Check advisories, licenses, sources, and unused dependencies.
 deps:
@@ -51,3 +54,19 @@ run:
 # Open the server in the MCP Inspector (needs Node.js).
 inspect:
     npx @modelcontextprotocol/inspector cargo run --quiet --locked
+
+# Prepare vendored inputs, build the database, and compile the release server.
+build: vendor-offsets vendor-api build-db
+    cargo build --release --locked
+
+# Download pinned inputs and build data/wotlk.sqlite.
+build-db:
+    bash scripts/build_db.sh
+
+# Validate the bundled offsets, or refresh them from a directory.
+vendor-offsets src="":
+    bash scripts/vendor_offsets.sh {{quote(src)}}
+
+# Export the pinned Lua API data, optionally updating the commit.
+vendor-api commit="":
+    bash scripts/vendor_api.sh {{quote(commit)}}
