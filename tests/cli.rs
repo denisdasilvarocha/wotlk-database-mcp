@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(not(windows))]
 use wotlk_database_mcp::SCHEMA_VERSION;
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -26,6 +25,15 @@ impl TestDirectory {
 impl Drop for TestDirectory {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+struct ChildGuard(std::process::Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 
@@ -111,14 +119,6 @@ fn stdio_shutdown_does_not_wait_for_another_installers_lock() -> Result<(), Box<
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
-    struct ChildGuard(std::process::Child);
-    impl Drop for ChildGuard {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-
     let directory = TestDirectory::new()?;
     let mut command = binary();
     let cache = isolated_cache(&mut command, &directory.0);
@@ -184,5 +184,86 @@ fn stdio_shutdown_does_not_wait_for_another_installers_lock() -> Result<(), Box<
     assert!(status.success(), "{status}");
     reader.join().map_err(|_| "stdout reader panicked")?;
     lock.unlock()?;
+    Ok(())
+}
+
+#[test]
+fn stdio_shutdown_does_not_wait_for_queued_sql_work() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{BufRead, Write};
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let directory = TestDirectory::new()?;
+    let path = directory.0.join("wotlk.sqlite");
+    let connection = rusqlite::Connection::open(&path)?;
+    connection.execute_batch("CREATE TABLE meta(name TEXT PRIMARY KEY, value TEXT);")?;
+    connection.execute(
+        "INSERT INTO meta VALUES ('schema_version', ?1)",
+        [SCHEMA_VERSION.to_string()],
+    )?;
+    connection.execute("INSERT INTO meta VALUES ('client_build', '12340')", [])?;
+    drop(connection);
+
+    let mut child = ChildGuard(
+        binary()
+            .arg("--db")
+            .arg(&path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?,
+    );
+    let mut stdin = child.0.stdin.take().ok_or("missing child stdin")?;
+    let stdout = child.0.stdout.take().ok_or("missing child stdout")?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines() {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    stdin.write_all(concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"shutdown-test","version":"1"}}}"#,
+        "\n"
+    ).as_bytes())?;
+    stdin.flush()?;
+    let initialize: rmcp::serde_json::Value =
+        rmcp::serde_json::from_str(&receiver.recv_timeout(Duration::from_secs(10))??)?;
+    assert_eq!(initialize["id"], 1);
+    assert!(initialize.get("result").is_some());
+
+    stdin.write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")?;
+    let started = Instant::now();
+    for id in 2..8 {
+        writeln!(
+            stdin,
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"sql","arguments":{{"query":"WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c"}}}}}}"#
+        )?;
+    }
+    stdin.flush()?;
+    let response: rmcp::serde_json::Value =
+        rmcp::serde_json::from_str(&receiver.recv_timeout(Duration::from_secs(10))??)?;
+    assert!((2..8).contains(&response["id"].as_u64().ok_or("missing SQL response id")?));
+    assert_eq!(response["result"]["isError"], true);
+    assert!(
+        started.elapsed() >= Duration::from_secs(1),
+        "SQL returned before executing"
+    );
+    drop(stdin);
+
+    // The MCP drain is bounded to five seconds; queued blocking queries must not extend it.
+    let deadline = Instant::now() + Duration::from_secs(7);
+    let status = loop {
+        if let Some(status) = child.0.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            return Err("server did not exit promptly with queued SQL work".into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(status.success(), "{status}");
+    reader.join().map_err(|_| "stdout reader panicked")?;
     Ok(())
 }

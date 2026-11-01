@@ -84,11 +84,16 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-#[tokio::main]
-async fn serve(server: WotlkServer, path: &Path) -> anyhow::Result<()> {
-    tracing::info!(path = %path.display(), "starting MCP server on stdio");
-    server.serve(stdio()).await?.waiting().await?;
-    Ok(())
+fn serve(server: WotlkServer, path: &Path) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let result = runtime.block_on(async {
+        tracing::info!(path = %path.display(), "starting MCP server on stdio");
+        server.serve(stdio()).await?.waiting().await?;
+        Ok(())
+    });
+    // Queued SQLite blocking workers must not delay EOF shutdown beyond the MCP drain.
+    runtime.shutdown_background();
+    result
 }
 
 #[cfg(test)]

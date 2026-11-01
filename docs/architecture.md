@@ -51,6 +51,8 @@ The builder writes a `.partial` file beside the output. It replaces the output a
 
 At runtime, the server opens one read-only connection. A mutex serializes database access. The server sends query work to `tokio::task::spawn_blocking` so synchronous SQLite calls run outside async tasks.
 
+When stdin closes, the server allows up to five seconds for pending replies. It then exits without waiting for queued SQLite work or a blocked database download.
+
 The server selects `--db`, then `WOTLK_DB`, then the cache for schema version 1. Explicit paths never download. The server checks `meta.schema_version` before it accepts a database.
 
 On a cache miss, the server starts the download on a background thread at startup. The handshake and tool list do not wait for it. Its database state is downloading, ready, or failed. Tool calls report download progress until the database is ready. Download failures become tool errors with recovery steps.
