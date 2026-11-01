@@ -53,9 +53,9 @@ At runtime, the server opens one read-only connection. A mutex serializes databa
 
 The server selects `--db`, then `WOTLK_DB`, then the cache for schema version 1. Explicit paths never download. The server checks `meta.schema_version` before it accepts a database.
 
-On a cache miss, the server completes the handshake before it downloads the release asset. Its database state is loading, ready, or failed. Tools report download progress while loading. After verification, tools use the database without a restart. Download failures become tool errors with recovery steps.
+On a cache miss, the server starts the download on a background thread at startup. The handshake and tool list do not wait for it. Its database state is downloading, ready, or failed. Tool calls report download progress until the database is ready. Download failures become tool errors with recovery steps.
 
-The download process locks the cache, checks it again, and decompresses into a temporary file. It verifies the decompressed file against the SHA-256 checksum embedded in the binary. It syncs the file and renames it to the final cache path. Concurrent processes share the same lock.
+The download process locks the cache, checks it again, and decompresses into `wotlk.sqlite.partial`. It verifies the decompressed file against the SHA-256 checksum embedded in the binary. It syncs the file and renames it to the final cache path. Concurrent processes share the same lock. A new attempt replaces a partial file left by an interrupted download.
 
 ## Data sources and pins
 

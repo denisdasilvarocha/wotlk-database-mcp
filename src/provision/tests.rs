@@ -1,5 +1,4 @@
 use std::{
-    fmt::Write as _,
     fs,
     io::{BufRead, BufReader, Write},
     net::TcpListener,
@@ -43,10 +42,7 @@ impl Fixture {
         .expect("write fixture metadata");
         drop(conn);
         let bytes = fs::read(source).expect("read fixture database");
-        let mut hash = String::new();
-        for byte in Sha256::digest(&bytes) {
-            write!(&mut hash, "{byte:02x}").expect("format fixture checksum");
-        }
+        let hash = super::hex(&Sha256::digest(&bytes));
         Self {
             path: dir.join("cache/wotlk.sqlite"),
             compressed: zstd::stream::encode_all(bytes.as_slice(), 1).expect("compress fixture database"),
@@ -129,14 +125,15 @@ fn installs_verified_database_and_reports_compressed_byte_progress() {
 }
 
 #[test]
-fn successful_install_removes_temporary_files_from_interrupted_processes() {
+fn install_replaces_partial_file_from_interrupted_process() {
     let fixture = Fixture::new();
     fs::create_dir_all(fixture.path.parent().expect("cache directory")).expect("create cache directory");
-    let stale = fixture.path.with_file_name("wotlk.sqlite.tmp-999999999");
+    let stale = fixture.path.with_added_extension("partial");
     fs::write(&stale, b"interrupted database").expect("seed interrupted download");
     let (url, http) = serve_once(fixture.compressed.clone(), None);
     drop(fixture.provisioner(url).install(|_| {}).expect("install database"));
     http.join().expect("join HTTP server");
+    assert!(fixture.path.is_file());
     assert!(!stale.exists());
 }
 
@@ -150,12 +147,7 @@ fn wrong_hash_removes_partial_file_and_never_installs_database() {
     http.join().expect("join HTTP server");
     assert!(error.to_string().contains("checksum mismatch"), "{error}");
     assert!(!fixture.path.exists());
-    assert!(
-        !fixture
-            .path
-            .with_file_name(format!("wotlk.sqlite.tmp-{}", std::process::id()))
-            .exists()
-    );
+    assert!(!fixture.path.with_added_extension("partial").exists());
 }
 
 #[test]

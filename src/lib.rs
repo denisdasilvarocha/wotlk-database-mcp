@@ -7,7 +7,6 @@ mod provision;
 mod schema_version;
 mod server;
 
-pub use db::DatabaseError;
 pub use provision::fetch_database;
 pub use schema_version::SCHEMA_VERSION;
 pub use server::WotlkServer;

@@ -26,50 +26,6 @@ pub(crate) struct Database {
     conn: Mutex<Connection>,
 }
 
-/// A database cannot be opened or does not match the server's schema.
-#[derive(Debug)]
-pub enum DatabaseError {
-    /// SQLite could not open or inspect the database.
-    Sql(Error),
-    /// The database has a different schema version or no schema version.
-    SchemaMismatch {
-        /// The schema version required by this server.
-        expected: u32,
-        /// The stored version, or `None` when the metadata is absent.
-        found: Option<String>,
-    },
-}
-
-impl std::fmt::Display for DatabaseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Sql(error) => std::fmt::Display::fmt(error, f),
-            Self::SchemaMismatch { expected, found } => {
-                write!(
-                    f,
-                    "expected schema version {expected}, found {}",
-                    found.as_deref().unwrap_or("none")
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for DatabaseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Sql(error) => Some(error),
-            Self::SchemaMismatch { .. } => None,
-        }
-    }
-}
-
-impl From<Error> for DatabaseError {
-    fn from(error: Error) -> Self {
-        Self::Sql(error)
-    }
-}
-
 #[derive(Debug)]
 pub(crate) enum QueryError {
     /// Returned to the model as a failed tool call (`isError`).
@@ -85,7 +41,7 @@ impl From<Error> for QueryError {
 }
 
 impl Database {
-    pub(crate) fn open(path: &Path) -> Result<Self, DatabaseError> {
+    pub(crate) fn open(path: &Path) -> anyhow::Result<Self> {
         let mut conn =
             Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         conn.pragma_update(None, "query_only", true)?;
@@ -107,10 +63,10 @@ impl Database {
             None
         };
         if found.as_deref().and_then(|value| value.parse::<u32>().ok()) != Some(SCHEMA_VERSION) {
-            return Err(DatabaseError::SchemaMismatch {
-                expected: SCHEMA_VERSION,
-                found,
-            });
+            anyhow::bail!(
+                "expected schema version {SCHEMA_VERSION}, found {}",
+                found.as_deref().unwrap_or("none")
+            );
         }
         conn.query_row("SELECT value FROM meta WHERE name = 'client_build'", [], |row| {
             row.get::<_, String>(0)

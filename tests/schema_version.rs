@@ -89,7 +89,7 @@ fn open_preserves_sqlite_failures() {
     fs::write(&path, b"not a sqlite database").unwrap();
     let error = WotlkServer::open(&path).expect_err("corrupt database must be rejected");
     assert!(
-        matches!(error, wotlk_database_mcp::DatabaseError::Sql(_)),
+        error.downcast_ref::<rusqlite::Error>().is_some(),
         "unexpected error: {error}"
     );
 }
