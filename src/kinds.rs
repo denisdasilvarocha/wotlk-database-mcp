@@ -37,6 +37,13 @@ named_enum!(Relation {
     Criteria => "criteria"
 });
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub(crate) enum RecordId {
+    Number(i64),
+    Text(String),
+}
+
 macro_rules! loot_cols {
     () => {
         "l.chance, CASE WHEN l.min_count = l.max_count THEN l.min_count ELSE l.min_count || '-' || l.max_count END AS count, l.quest_required AS quest, l.group_id AS \"group\""

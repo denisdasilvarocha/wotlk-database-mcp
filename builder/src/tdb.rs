@@ -11,13 +11,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{BuildError, dbc::Context, dump, names};
 
-#[path = "tdb_creature.rs"]
 mod creature;
-#[path = "tdb_item.rs"]
 mod item;
-#[path = "tdb_quest.rs"]
 mod quest;
-#[path = "tdb_relations.rs"]
 mod relations;
 
 const HEX: &[u8; 16] = b"0123456789abcdef";

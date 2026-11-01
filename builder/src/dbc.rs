@@ -16,7 +16,11 @@ use wow_dbc::{
     },
 };
 
-use crate::{BuildError, names, text::real};
+use crate::{BuildError, names};
+
+mod spell_text;
+
+use spell_text::{SpellNumbers, effect_range, resolve};
 
 pub(crate) const FILES: &[&str] = &[
     Spell::FILENAME,
@@ -98,6 +102,11 @@ fn nz(value: i32) -> Option<i32> {
 }
 fn txt(value: &str) -> Option<&str> {
     (!value.is_empty()).then_some(value)
+}
+
+/// Converts the shortest decimal form of a DBC float without binary f32 noise.
+fn real(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or_else(|_| f64::from(value))
 }
 
 pub(crate) fn import(conn: &Connection, dir: &Path) -> Result<Context, BuildError> {
@@ -495,9 +504,6 @@ fn import_world(conn: &Connection, tables: &Tables, spell_names: &HashMap<i32, S
     reason = "Keeping the fixed database column mapping together makes it easier to audit"
 )]
 fn import_spells(conn: &Connection, tables: &Tables) -> Result<(), BuildError> {
-    use crate::spell_text::{SpellNumbers, resolve};
-    use rusqlite::params;
-    use std::collections::HashMap;
     use std::fmt::Write as _;
 
     let durations: HashMap<_, _> = tables.duration.rows.iter().map(|r| (r.id.id, r)).collect();
@@ -603,7 +609,7 @@ fn import_spells(conn: &Connection, tables: &Tables) -> Result<(), BuildError> {
             let base = s.effect_base_points[i];
             let sides = s.effect_die_sides[i];
             let value = (base != 0 || sides != 0).then(|| {
-                let (start, end) = crate::spell_text::effect_range(base, sides);
+                let (start, end) = effect_range(base, sides);
                 if (0..=1).contains(&sides) {
                     start.to_string()
                 } else {

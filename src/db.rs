@@ -11,8 +11,7 @@ use rusqlite::{Connection, Error, ErrorCode, OpenFlags, limits::Limit, params, t
 
 use crate::{
     format,
-    kinds::{Kind, Relation},
-    server::RecordId,
+    kinds::{Kind, RecordId, Relation},
 };
 
 #[derive(Debug)]

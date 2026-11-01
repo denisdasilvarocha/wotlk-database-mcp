@@ -7,9 +7,7 @@ mod index;
 mod names;
 mod offsets;
 mod schema;
-mod spell_text;
 mod tdb;
-mod text;
 
 use rusqlite::Connection;
 use std::{

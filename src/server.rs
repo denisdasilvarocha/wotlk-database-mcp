@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::{
     db::{self, Database, QueryError},
-    kinds::{Kind, Relation},
+    kinds::{Kind, RecordId, Relation},
 };
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -50,13 +50,6 @@ pub(crate) struct SqlParams {
     pub query: String,
     /// Maximum rows, 1 to 1000. Default 200.
     pub limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(untagged)]
-pub(crate) enum RecordId {
-    Number(i64),
-    Text(String),
 }
 
 /// MCP server that exposes the WotLK database tools.
