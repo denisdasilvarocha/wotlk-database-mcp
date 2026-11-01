@@ -31,6 +31,8 @@ windows-archive = ".zip"
 github-build-setup = "../build-setup.yml"
 # Publish jobs to run in CI
 publish-jobs = ["./publish-npm"]
+# Release candidates go to npm under the `next` dist-tag (see publish-npm.yml).
+publish-prereleases = true
 
 [dist.github-custom-job-permissions.publish-npm]
 contents = "read"
