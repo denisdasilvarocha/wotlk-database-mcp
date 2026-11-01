@@ -1,0 +1,59 @@
+name: Release database
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: database-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
+          persist-credentials: false
+      - name: Install database tools
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends sqlite3 zstd
+      - name: Validate and package database
+        id: database
+        shell: bash
+        run: |
+          set -euo pipefail
+          schema=$(sed -nE 's/^pub const SCHEMA_VERSION: u32 = ([0-9]+);$/\1/p' src/schema_version.rs)
+          [[ "$schema" =~ ^[0-9]+$ ]]
+          actual=$(sqlite3 data/wotlk.sqlite "SELECT value FROM meta WHERE name = 'schema_version';")
+          [[ "$actual" == "$schema" ]] || { echo "expected schema version $schema, found $actual" >&2; exit 1; }
+          base="wotlk-schema${schema}.sqlite"
+          zstd -19 data/wotlk.sqlite -o "$base.zst"
+          printf '%s  %s\n' "$(sha256sum data/wotlk.sqlite | cut -d ' ' -f 1)" "$base" > "$base.sha256"
+          expected=$(cut -d ' ' -f 1 "$base.sha256")
+          actual=$(zstd -dc "$base.zst" | sha256sum | cut -d ' ' -f 1)
+          [[ "$actual" == "$expected" ]]
+          echo "tag=db-schema${schema}" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: Publish immutable schema assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.database.outputs.tag }}
+          BASE: ${{ steps.database.outputs.base }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --json assets > release.json; then
+            if jq -e --arg compressed "$BASE.zst" --arg checksum "$BASE.sha256" '.assets[] | select(.name == $compressed or .name == $checksum)' release.json; then
+              echo "Refusing to replace database assets: binaries embed their checksum. Bump SCHEMA_VERSION instead." >&2
+              exit 1
+            fi
+          else
+            # Creation also fails on authentication/network errors; never upload to a guessed release.
+            gh release create "$TAG" --target "$GITHUB_SHA" --latest=false --title "Database $TAG" --notes "Immutable database assets for $TAG."
+          fi
+          gh release upload "$TAG" "$BASE.zst" "$BASE.sha256"

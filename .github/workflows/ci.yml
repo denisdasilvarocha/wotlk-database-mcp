@@ -113,3 +113,46 @@ jobs:
 
       - name: Build release
         run: cargo build --workspace --release --locked
+
+  npm-smoke:
+    name: npm install without scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Set up Rust
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: false
+      - name: Build server
+        run: cargo build --release --locked --package wotlk-database-mcp
+      - name: Test packaging
+        if: runner.os != 'Windows'
+        run: node --test npm/*.test.mjs
+      - name: Pack host packages
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "wotlk-database-mcp") | .version')
+          platform=$(node -p 'process.platform + "-" + process.arch')
+          node npm/build.mjs "$version" target/release packed "$platform"
+          node npm/check-packages.mjs packed
+      - name: Install without scripts and list MCP tools
+        run: |
+          install_dir="$RUNNER_TEMP/npm-smoke"
+          mkdir -p "$install_dir"
+          npm install --prefix "$install_dir" --ignore-scripts --no-audit --no-fund "$PWD"/packed/*.tgz
+          node npm/smoke.mjs "$install_dir"
