@@ -94,11 +94,12 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ fromJson(inputs.plan).releases[0].app_version }}
+        # `./` is required: npm reads `packed/<file>` as the GitHub shorthand `github:packed/<file>`.
         run: |
           set -euo pipefail
           tag=latest
           if [[ "$VERSION" == *-* ]]; then tag=next; fi
           for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
-            npm publish "packed/wotlk-database-mcp-${platform}-${VERSION}.tgz" --access public --tag "$tag"
+            npm publish "./packed/wotlk-database-mcp-${platform}-${VERSION}.tgz" --access public --tag "$tag"
           done
-          npm publish "packed/wotlk-database-mcp-${VERSION}.tgz" --access public --tag "$tag"
+          npm publish "./packed/wotlk-database-mcp-${VERSION}.tgz" --access public --tag "$tag"
