@@ -63,6 +63,8 @@ jobs:
           msystem: UCRT64
           # Inherit the runner PATH so rustup, cargo, and installed tools stay
           # reachable from the MSYS2 shell; MSYS2 paths are prepended.
+          # No MSYS2 git: its /d/a/... paths do not match the Windows paths of
+          # native prek, so the runner's Git for Windows must be used.
           path-type: inherit
           update: false
           install: >-
@@ -70,7 +72,6 @@ jobs:
             coreutils
             curl
             findutils
-            git
             grep
             jq
             sed
