@@ -4,7 +4,7 @@ Build `data/wotlk.sqlite` from the pinned inputs. Use this guide after you updat
 
 ## Prerequisites
 
-Complete [Install prerequisites](../install.md#1-install-prerequisites) and run `just setup` in your checkout. Run all commands below from the repository root in Bash.
+Complete [Install prerequisites](../install.md#install-prerequisites) and run `just setup` in your checkout. Run all commands below from the repository root in Bash.
 
 > [!WARNING]
 > The first build downloads about 1.2 GB of client data and a 47 MB TDB dump. Allow network access and disk space for the archives, extracted files, and database.
@@ -103,7 +103,7 @@ Call `get` with these arguments:
 {"kind": "meta"}
 ```
 
-Check the returned build provenance against your selected inputs. Then perform the [connection verification](../install.md#4-verify-the-connection).
+Check the returned build provenance against your selected inputs. Then perform the [connection verification](../install.md#6-verify-the-connection).
 
 ## Troubleshoot the build
 

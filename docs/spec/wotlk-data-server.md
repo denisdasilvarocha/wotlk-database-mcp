@@ -76,8 +76,8 @@ Agents use four generic tools: `search`, `get`, `related`, and `sql`. Every tool
 60. As the maintainer, I want the builder to check that the DBC folder is for build 12340 and enUS, so that I do not build from the wrong client by mistake.
 61. As the maintainer, I want the builder to read the TDB dump directly without a MySQL server, so that the build has no service dependencies.
 62. As the maintainer, I want the build to fail with a clear message when an input is missing or malformed, so that I never commit a partial database.
-63. As the maintainer, I want the server to find the database through a flag, an environment variable, or a compiled-in default, so that it works from any working directory.
-64. As the maintainer, I want the server to fail fast when the database file is missing, so that the MCP client shows the real problem.
+63. As the maintainer, I want the server to find the database through a flag, an environment variable, or the user cache, so that it works from any working directory.
+64. As the maintainer, I want the server to fail fast when an explicit database file is missing, so that the MCP client shows the real problem.
 65. As the maintainer, I want the large database stored with Git LFS, so that the repository stays within GitHub limits.
 66. As the maintainer, I want CI to run without downloading the LFS database, so that CI stays fast and uses no LFS bandwidth.
 67. As the maintainer, I want the offsets and the Lua API data vendored and pinned, so that a build is reproducible on any machine.
@@ -139,13 +139,15 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 - Spells store both the raw description and the resolved description. The resolver handles `$s`, `$m`, `$d`, `$o`, `$t`, `$a`, `$x`, `$r`, and references to other spells (for example `$12345s1`). Formulas (`${...}`) and `$l`/`$g` conditionals are left unchanged. Negative die sides preserve the full signed effect range. Resolved `$s` and `$o` show ascending magnitude ranges. `$m` uses the minimum magnitude, including zero when the range crosses zero.
 - One unified FTS5 search table holds every searchable entity as (name, terms, kind, id, subtext, priority). Only `name` and `terms` are indexed; `terms` holds split identifier words and extra words such as spell rank and family or creature title. `priority` ranks player-learnable spells and spawned creatures above NPC copies. It uses the `unicode61 remove_diacritics` tokenizer and a prefix index for 2 and 3 characters.
 - Icon columns of spells, skills, glyphs, achievements, and talent tabs store the icon name without the `Interface\Icons\` prefix, as item icons do. The `spell_icon` table keeps the raw texture path.
-- A `meta` table records the TDB release, the dump's sha256, the client build, the codex commit, the offsets copy date, and the builder version.
+- A `meta` table records the schema version, TDB release, dump SHA-256, client build, codex commit, offsets copy date, and builder version.
 
 ### Server runtime
 
 - `rusqlite` with the `bundled` feature (version 0.41; FTS5 is included). The database is opened read-only with `query_only` on. Queries run on `spawn_blocking`.
-- The server takes the database path from `--db`, then the `WOTLK_DB` environment variable, then a default of `data/wotlk.sqlite` under the crate manifest directory, compiled in. If the file is missing, the server stops at startup with a clear error.
-- No network access at runtime.
+- The server takes the database path from `--db`, then `WOTLK_DB`, then the schema-version cache. An explicit path never triggers a download. A missing explicit file causes an error that names the path.
+- Without a valid cache, the server answers the MCP handshake and lists tools before it downloads the database. Tools report download progress until ready. Queries need no network connection after provisioning. See the [configuration reference](../reference/configuration.md).
+- The server requires `meta.schema_version` to equal `1`. It refuses missing or different versions.
+- `wotlk-database-mcp fetch` downloads and verifies the database in the foreground.
 
 ### Tool contract
 

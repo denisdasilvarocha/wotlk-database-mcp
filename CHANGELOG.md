@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+> [!WARNING]
+> **BREAKING**: Source builds no longer use the checkout database by default. Pass `--db <path>` or set `WOTLK_DB`. See [local database setup](docs/install.md#3-select-a-local-database).
+
 ### Added
 
 - Query local WotLK data over stdio with the read-only MCP tools `search`, `get`, `related`, and `sql`. ([#1](https://github.com/denisdasilvarocha/wotlk-database-mcp/pull/1))
@@ -15,6 +18,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Loot relations follow shared loot tables and identify the source table with `via=N`.
 - Quest chains report each quest's distance from the queried quest with `step=n`.
 - Vendor relations separate required gold from extended costs. Spawn relations label world coordinates and separate zone names from map names.
+- Start the server through npm and `npx` on macOS ARM64 and x86_64, Linux ARM64 and x86_64, and Windows x86_64.
+- Use `fetch` to download and verify the database before you connect.
+- Download the database into a schema-version cache when no explicit path is set. The handshake and tool list remain available during the download.
+- Check `meta.schema_version` when the server opens a database.
+
+### Changed
+
+- **BREAKING**: Databases without `meta.schema_version` equal to `1` are refused. Rebuild with `just build-db` or download the matching database.
+
+### Removed
+
+- **BREAKING**: Removed the compile-time fallback to the checkout's `data/wotlk.sqlite`. Pass `--db <path>` or set `WOTLK_DB`.
 
 ### Fixed
 

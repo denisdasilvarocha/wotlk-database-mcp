@@ -28,7 +28,7 @@ flowchart LR
 
 Use the server to find records and follow their links.
 
-- **Query offline.** The server needs no network connection at runtime.
+- **Query offline.** Queries need no network connection after the database download.
 - **Find game data.** Search items, spells, creatures, quests, and other game records by name.
 - **Follow relationships.** Find loot sources, vendors, trainers, quest chains, and spell ranks.
 - **Check client interfaces.** Look up Lua API records and Windows x86 offsets with verification status.
@@ -36,95 +36,63 @@ Use the server to find records and follow their links.
 
 ## Supported platforms
 
-The setup scripts support these build environments.
+The npm package supports these platforms without Rust or an install script.
 
-| Platform | Build environment |
+| Platform | Architectures |
 | --- | --- |
-| macOS | Bash and Homebrew |
-| Linux | Bash with apt, dnf, or pacman |
-| Windows x86_64 | MSYS2 UCRT64 Bash and Microsoft C++ Build Tools |
+| macOS | ARM64 and x86_64 |
+| Linux | x86_64 and ARM64 (GNU targets) |
+| Windows | x86_64 |
 
 ## For agents
 
-Paste this prompt into your AI agent. It installs the prerequisites, builds the server, and registers it in the agent's harness.
+Paste this prompt into your AI agent to register the server.
 
 ```text
-Install the wotlk-database MCP server for this harness. Follow every step in
+Install the wotlk-database MCP server for this harness. Follow:
 https://github.com/denisdasilvarocha/wotlk-database-mcp/blob/main/docs/install.md
-exactly: install the prerequisites, clone and build the repository, register the
-server in this harness's MCP configuration with absolute paths, then run the
-verification step. Keep the existing MCP servers. Report the paths you used and
-the verification result.
+Use the npx configuration. Keep the existing MCP servers. Run the verification
+step and report the result.
 ```
 
 ## Install
 
-Install from source with the [platform prerequisites](docs/install.md#1-install-prerequisites).
-
-> [!IMPORTANT]
-> This repository is private. You need repository access before you can clone it.
-
-<details open>
-<summary><b>macOS</b></summary>
-
-After you install the prerequisites, clone the repository and prepare the tools:
-
-```sh
-git clone https://github.com/denisdasilvarocha/wotlk-database-mcp.git
-cd wotlk-database-mcp
-just setup
-```
-
-</details>
-
-<details>
-<summary><b>Linux</b></summary>
-
-After you install the prerequisites, run these commands in Bash:
-
-```sh
-git clone https://github.com/denisdasilvarocha/wotlk-database-mcp.git
-cd wotlk-database-mcp
-just setup
-```
-
-</details>
-
-<details>
-<summary><b>Windows x86_64</b></summary>
-
-After you install the prerequisites, run these commands in the MSYS2 UCRT64 terminal:
-
-```sh
-git clone https://github.com/denisdasilvarocha/wotlk-database-mcp.git
-cd wotlk-database-mcp
-just setup
-```
-
-</details>
-
-## Quick start
-
-Build the database and server from the repository root:
-
-```sh
-just build
-```
-
-Add this entry under `mcpServers` in your MCP client configuration. Keep your existing entries, and replace both paths with absolute paths into your checkout:
+Install Node.js with npm and `npx`. Add this entry to your MCP client configuration. Keep your existing MCP servers.
 
 ```json
 {
   "mcpServers": {
     "wotlk-database": {
-      "command": "/absolute/path/to/wotlk-database-mcp/target/release/wotlk-database-mcp",
-      "args": ["--db", "/absolute/path/to/wotlk-database-mcp/data/wotlk.sqlite"]
+      "command": "npx",
+      "args": ["-y", "wotlk-database-mcp"]
     }
   }
 }
 ```
 
-On Windows, add `.exe` to the command and use forward slashes, for example `C:/src/wotlk-database-mcp/data/wotlk.sqlite`.
+## Quick start
+
+To download and verify the database before you connect, run:
+
+```sh
+npx -y wotlk-database-mcp fetch
+```
+
+You can also connect at once. The server answers the handshake and lists tools before the first download finishes. Tools return a downloading error with a percentage until the database is ready. Retry the call after the download. You do not need to restart the server.
+
+The cache file for schema version 1 uses these locations:
+
+| Platform | Cache file |
+| --- | --- |
+| macOS | `~/Library/Caches/wotlk-database-mcp/schema-1/wotlk.sqlite` |
+| Linux | `$XDG_CACHE_HOME/wotlk-database-mcp/schema-1/wotlk.sqlite`, or `~/.cache/wotlk-database-mcp/schema-1/wotlk.sqlite` when unset |
+| Windows | `%LOCALAPPDATA%/wotlk-database-mcp/schema-1/wotlk.sqlite` |
+
+To use a local file, set `WOTLK_DB` or pass `--db /absolute/path/to/wotlk.sqlite`. `--db` takes precedence. Explicit paths never download a database.
+
+For a manual download, use the [release asset and decompression steps](docs/install.md#download-manually). The URL uses `db-schema<N>/wotlk-schema<N>.sqlite.zst`, with schema version `1` today. Run `zstd -d` on the asset and set `WOTLK_DB` to the decompressed file.
+
+Set `HTTPS_PROXY` or `https_proxy` in the server environment if downloads require a proxy.
 
 Reconnect the client, then call the `sql` tool with these arguments:
 
@@ -155,10 +123,16 @@ Choose a page for your task.
 
 ## Development
 
-The project requires Rust 1.99 or later. After setup, run the server from source:
+The project requires Rust 1.99 or later. Follow the [source build steps](docs/install.md#5-build-from-source), then run:
 
 ```sh
 just run
+```
+
+`just run` passes `--db data/wotlk.sqlite`. You can also run:
+
+```sh
+cargo run -- --db data/wotlk.sqlite
 ```
 
 Run the tests:

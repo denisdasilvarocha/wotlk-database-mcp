@@ -4,7 +4,7 @@ Use this workflow to change the server, the builder, or the documentation. The s
 
 ## Set up development
 
-Install the [platform prerequisites and `just`](docs/install.md#1-install-prerequisites) before setup. From the repository root, run:
+Install the [platform prerequisites and `just`](docs/install.md#install-prerequisites) before setup. From the repository root, run:
 
 ```sh
 just setup
@@ -30,8 +30,8 @@ The `justfile` defines these development commands. Run `just` to list them.
 | `just doc` | Build workspace API docs without dependencies. Treat rustdoc warnings as errors. |
 | `just deps` | Run `cargo deny` checks and reject unused dependencies with `cargo shear`. |
 | `just check` | Run all `prek` hooks at the manual stage. |
-| `just run` | Run the server over stdio with Cargo. |
-| `just inspect` | Start MCP Inspector through `npx`. This command requires Node.js. |
+| `just run` | Run the server over stdio with Cargo and `--db data/wotlk.sqlite`. |
+| `just inspect` | Start MCP Inspector through `npx` with `--db data/wotlk.sqlite`. This command requires Node.js. |
 | `just build` | Validate offsets, export the pinned API data, build the database, and compile the release server. |
 | `just build-db` | Download pinned inputs and build `data/wotlk.sqlite`. |
 | `just vendor-offsets` | Validate the bundled offsets catalog. |
