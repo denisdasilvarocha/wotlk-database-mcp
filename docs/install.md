@@ -1,14 +1,12 @@
 # Install for an MCP harness
 
-Use this guide to build the server and register it in the harness you are using.
+Follow these steps to build the server and register it in the harness you run in.
 
 ## 1. Install prerequisites
 
-Follow the [platform prerequisites](../README.md#quick-start), including installing `just` and using the specified Bash shell. Setup requires network access and may request administrator privileges. The first build downloads about 1.2 GB of client data and a 47 MB database dump.
+Install the platform requirements and `just` from the [README prerequisites](../README.md#prerequisites). On Windows, use the MSYS2 UCRT64 terminal for every command. The build needs network access. On Linux, setup can ask for `sudo`.
 
 ## 2. Clone and build
-
-In the supported Bash shell, clone the repository and run these commands from its root:
 
 ```sh
 git clone https://github.com/denisdasilvarocha/wotlk-database-mcp.git
@@ -17,11 +15,14 @@ just setup
 just build
 ```
 
-The build prepares the vendored offsets and API, database, and release binary. The outputs are `target/release/wotlk-database-mcp` and `data/wotlk.sqlite`. On native Windows, the binary has an `.exe` extension.
+The first build downloads about 1.2 GB of client data and a 47 MB TDB dump. It produces two files:
+
+- `target/release/wotlk-database-mcp` (`wotlk-database-mcp.exe` on Windows)
+- `data/wotlk.sqlite`
 
 ## 3. Register the server
 
-Add `wotlk-database` under `mcpServers` in your harness configuration. Preserve existing server entries:
+Add a `wotlk-database` entry under `mcpServers` in the harness configuration. Keep the existing entries:
 
 ```json
 {
@@ -34,14 +35,16 @@ Add `wotlk-database` under `mcpServers` in your harness configuration. Preserve 
 }
 ```
 
-Replace both example paths with absolute paths to your checkout's binary and database. On native Windows, use the absolute path to the `.exe` binary. The harness launches the command over stdio; there is no HTTP port. Logs go to stderr.
+- Replace both paths with absolute paths into the checkout.
+- On Windows, point `command` at the `.exe` file and write paths with forward slashes, for example `C:/src/wotlk-database-mcp/data/wotlk.sqlite`.
+- If the harness uses another configuration format, put the binary path in its command field and `--db <path>` in its arguments.
 
-## 4. Reconnect and verify
+The server uses stdio transport. It has no HTTP port and needs no environment variables.
 
-Reload the configuration or reconnect the server using your harness. Confirm it exposes `search`, `get`, `related`, and `sql`. Call the `sql` tool with these arguments:
+## 4. Verify
 
-```json
-{"query": "SELECT 1 AS ok"}
-```
+1. Reload the harness configuration or reconnect the server.
+2. Confirm that the server shows the tools `search`, `get`, `related`, and `sql`.
+3. Call `sql` with `{"query": "SELECT 1 AS ok"}`. The result is the line `ok` followed by the line `1`.
 
-The result contains the header `ok` and one row containing `1`. If the server fails to connect, inspect its stderr and check the binary and database paths.
+If the server does not connect, read its stderr. `database file not found` means the `--db` path is wrong. A missing binary means `just build` did not finish.
