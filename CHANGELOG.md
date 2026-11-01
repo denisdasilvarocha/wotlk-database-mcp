@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **BREAKING**: Databases without `meta.schema_version` equal to `1` are refused. Rebuild with `just build-db` or download the matching database.
+- Start database downloads in the background at startup. The handshake and tool list do not wait for the download.
 
 ### Removed
 

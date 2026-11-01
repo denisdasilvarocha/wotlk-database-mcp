@@ -1,6 +1,7 @@
 use std::{
-    path::Path,
-    sync::{Arc, Once},
+    path::{Path, PathBuf},
+    sync::Arc,
+    thread,
 };
 
 use rmcp::{
@@ -13,7 +14,7 @@ use serde::Deserialize;
 use tokio::sync::watch;
 
 use crate::{
-    db::{self, Database, DatabaseError, QueryError},
+    db::{self, Database, QueryError},
     kinds::{Kind, RecordId, RelatedKind, Relation, SearchKind},
     provision::Provisioner,
 };
@@ -71,13 +72,11 @@ pub(crate) struct SqlParams {
 #[derive(Debug, Clone)]
 pub struct WotlkServer {
     state: watch::Sender<DatabaseState>,
-    provisioner: Option<Arc<Provisioner>>,
-    start: Arc<Once>,
 }
 
 #[derive(Debug)]
 enum DatabaseState {
-    Loading { percent: u8 },
+    Downloading(u8),
     Ready(Arc<Database>),
     Failed(String),
 }
@@ -87,36 +86,41 @@ impl WotlkServer {
     ///
     /// # Errors
     /// Returns an error if the database cannot be opened or has a different schema version.
-    pub fn open(path: &Path) -> Result<Self, DatabaseError> {
-        Ok(Self::with_state(
-            DatabaseState::Ready(Arc::new(Database::open(path)?)),
-            None,
-        ))
+    pub fn open(path: &Path) -> anyhow::Result<Self> {
+        Ok(Self::ready(Database::open(path)?))
     }
 
-    /// Uses a valid database cache, or downloads it after the MCP handshake.
-    ///
-    /// `path` is the final SQLite cache path. Download failures are returned as tool
-    /// errors, so initialization and tool discovery do not require network access.
+    /// Uses the valid cache at `path`, or downloads it in the background.
+    /// The handshake and tool list never wait for the download; tool calls report its progress or failure.
     #[must_use]
-    pub fn cached(path: &Path) -> Self {
-        Self::with_provisioner(Provisioner::new(path))
+    pub fn cached(path: PathBuf) -> Self {
+        Self::provision(Provisioner::new(path))
     }
 
-    fn with_provisioner(provisioner: Provisioner) -> Self {
-        if let Ok(database) = Database::open(&provisioner.path) {
-            return Self::with_state(DatabaseState::Ready(Arc::new(database)), None);
-        }
-        Self::with_state(DatabaseState::Loading { percent: 0 }, Some(Arc::new(provisioner)))
-    }
-
-    fn with_state(state: DatabaseState, provisioner: Option<Arc<Provisioner>>) -> Self {
-        let (state, _) = watch::channel(state);
+    fn ready(database: Database) -> Self {
         Self {
-            state,
-            provisioner,
-            start: Arc::new(Once::new()),
+            state: watch::Sender::new(DatabaseState::Ready(Arc::new(database))),
         }
+    }
+
+    fn provision(provisioner: Provisioner) -> Self {
+        if let Ok(database) = Database::open(&provisioner.path) {
+            return Self::ready(database);
+        }
+        let state = watch::Sender::new(DatabaseState::Downloading(0));
+        let updates = state.clone();
+        // A detached OS thread, not a Tokio blocking task: the process must exit
+        // when stdio closes, even while the installer waits for another process's cache lock.
+        thread::spawn(move || {
+            let next = match provisioner.install(|percent| {
+                updates.send_replace(DatabaseState::Downloading(percent));
+            }) {
+                Ok(database) => DatabaseState::Ready(Arc::new(database)),
+                Err(error) => DatabaseState::Failed(error.to_string()),
+            };
+            updates.send_replace(next);
+        });
+        Self { state }
     }
 
     async fn query<F>(&self, f: F) -> Result<CallToolResult, ErrorData>
@@ -125,7 +129,7 @@ impl WotlkServer {
     {
         let db = match &*self.state.borrow() {
             DatabaseState::Ready(db) => Arc::clone(db),
-            DatabaseState::Loading { percent } => {
+            DatabaseState::Downloading(percent) => {
                 return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                     "Database downloading: {percent}%. Please retry when the download finishes."
                 ))]));
@@ -216,34 +220,6 @@ impl WotlkServer {
     reason = "rmcp #[tool_handler] generates async fns without .await"
 )]
 impl ServerHandler for WotlkServer {
-    async fn on_initialized(&self, _context: rmcp::service::NotificationContext<rmcp::RoleServer>) {
-        let Some(provisioner) = &self.provisioner else {
-            return;
-        };
-        self.start.call_once(|| {
-            let provisioner = Arc::clone(provisioner);
-            let state = self.state.clone();
-            tokio::spawn(async move {
-                let progress_state = state.clone();
-                let download = Arc::clone(&provisioner);
-                let result = tokio::task::spawn_blocking(move || {
-                    download
-                        .install(|percent| {
-                            progress_state.send_replace(DatabaseState::Loading { percent });
-                        })
-                        .map_err(|error| download.failure(&error))
-                })
-                .await;
-                let next = match result {
-                    Ok(Ok(database)) => DatabaseState::Ready(Arc::new(database)),
-                    Ok(Err(message)) => DatabaseState::Failed(message),
-                    Err(error) => DatabaseState::Failed(provisioner.failure(&error)),
-                };
-                state.send_replace(next);
-            });
-        });
-    }
-
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,

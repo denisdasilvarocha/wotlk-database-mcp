@@ -55,7 +55,7 @@ async fn handshake_and_tools_list_do_not_wait_for_download_and_tools_recover_wit
     let fixture = Fixture::new();
     let (release, waiting) = mpsc::channel();
     let (url, http) = serve_once(fixture.compressed.clone(), Some(waiting));
-    let server = WotlkServer::with_provisioner(fixture.provisioner(url));
+    let server = WotlkServer::provision(fixture.provisioner(url));
     let (client, task) = tokio::time::timeout(Duration::from_secs(2), connect(server))
         .await
         .expect("handshake before download");
@@ -102,7 +102,7 @@ async fn unreachable_host_becomes_tool_error_with_cause_url_and_manual_retry() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve unreachable address");
     let url = format!("http://{}/database.zst", listener.local_addr().expect("address"));
     drop(listener);
-    let server = WotlkServer::with_provisioner(fixture.provisioner(url.clone()));
+    let server = WotlkServer::provision(fixture.provisioner(url.clone()));
     let (client, task) = connect(server).await;
     let failure = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -133,7 +133,7 @@ async fn no_checksum_build_still_serves_handshake_and_reports_actionable_tool_er
     let fixture = Fixture::new();
     let mut provisioner = fixture.provisioner("http://127.0.0.1:1/database.zst".to_owned());
     provisioner.sha256 = None;
-    let (client, task) = connect(WotlkServer::with_provisioner(provisioner)).await;
+    let (client, task) = connect(WotlkServer::provision(provisioner)).await;
     assert_eq!(client.list_tools(None).await.expect("list tools").tools.len(), 4);
     let failure = tokio::time::timeout(Duration::from_secs(5), async {
         loop {

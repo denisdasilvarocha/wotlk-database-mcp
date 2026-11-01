@@ -35,6 +35,21 @@ fn binary() -> Command {
     command
 }
 
+#[cfg(not(windows))]
+fn isolated_cache(command: &mut Command, home: &Path) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    let root = {
+        command.env("HOME", home);
+        home.join("Library/Caches")
+    };
+    #[cfg(not(target_os = "macos"))]
+    let root = {
+        command.env("XDG_CACHE_HOME", home);
+        home.to_path_buf()
+    };
+    root.join("wotlk-database-mcp").join(format!("schema-{SCHEMA_VERSION}"))
+}
+
 fn missing_explicit_path(path: &Path, environment: bool) -> Result<(), Box<dyn std::error::Error>> {
     let mut command = binary();
     if environment {
@@ -62,28 +77,13 @@ fn missing_environment_database_exits_with_path() -> Result<(), Box<dyn std::err
     missing_explicit_path(&directory.0.join("missing.sqlite"), true)
 }
 
-// Windows resolves its Known Folder through the OS, not LOCALAPPDATA; use the
-// injected-path foreground unit test there instead of touching the user's cache.
+// Windows resolves its Known Folder through the OS, not LOCALAPPDATA; avoid the user's cache.
 #[cfg(not(windows))]
 #[test]
 fn fetch_uses_valid_cache_without_stdout_or_download() -> Result<(), Box<dyn std::error::Error>> {
     let directory = TestDirectory::new()?;
     let mut command = binary();
-    // Override only the native platform cache inputs, in the child process.
-    #[cfg(target_os = "macos")]
-    let cache_root = {
-        command.env("HOME", &directory.0);
-        directory.0.join("Library/Caches")
-    };
-    #[cfg(not(target_os = "macos"))]
-    let cache_root = {
-        command.env("XDG_CACHE_HOME", &directory.0);
-        directory.0.clone()
-    };
-    let path = cache_root
-        .join("wotlk-database-mcp")
-        .join(format!("schema-{SCHEMA_VERSION}"))
-        .join("wotlk.sqlite");
+    let path = isolated_cache(&mut command, &directory.0).join("wotlk.sqlite");
     std::fs::create_dir_all(path.parent().ok_or("database has no parent")?)?;
     let connection = rusqlite::Connection::open(&path)?;
     connection.execute_batch("CREATE TABLE meta(name TEXT PRIMARY KEY, value TEXT);")?;
@@ -121,19 +121,7 @@ fn stdio_shutdown_does_not_wait_for_another_installers_lock() -> Result<(), Box<
 
     let directory = TestDirectory::new()?;
     let mut command = binary();
-    #[cfg(target_os = "macos")]
-    let cache_root = {
-        command.env("HOME", &directory.0);
-        directory.0.join("Library/Caches")
-    };
-    #[cfg(not(target_os = "macos"))]
-    let cache_root = {
-        command.env("XDG_CACHE_HOME", &directory.0);
-        directory.0.clone()
-    };
-    let cache = cache_root
-        .join("wotlk-database-mcp")
-        .join(format!("schema-{SCHEMA_VERSION}"));
+    let cache = isolated_cache(&mut command, &directory.0);
     std::fs::create_dir_all(&cache)?;
     let lock = std::fs::File::options()
         .read(true)
