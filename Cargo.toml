@@ -4,7 +4,7 @@ resolver = "3"
 
 [package]
 name = "wotlk-database-mcp"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 edition = "2024"
 rust-version = "1.99"
 description = "MCP server for the World of Warcraft: Wrath of the Lich King database"
