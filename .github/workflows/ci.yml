@@ -65,8 +65,21 @@ jobs:
             if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1
             else shasum -a 256 "$1" | cut -d ' ' -f 1; fi
           }
-          export TDB_URL="file://$work/world.7z" TDB_SHA256="$(sha "$work/world.7z")" TDB_MEMBER=tdb.sql
-          export DBC_URL="file://$work/data.zip" DBC_SHA256="$(sha "$work/data.zip")" DBC_MEMBER=dbc
+          # curl treats file URL paths as Windows paths under MSYS, not as
+          # MSYS virtual paths such as /tmp, so use native absolute paths.
+          file_url() {
+            local path=$1 prefix=file://
+            if command -v cygpath >/dev/null 2>&1; then
+              path=$(cygpath -m "$path") || return 1
+              prefix=file:///
+            fi
+            path=$(printf '%s' "$path" | sed 's/%/%25/g; s/ /%20/g; s/#/%23/g; s/?/%3F/g') || return 1
+            printf '%s%s\n' "$prefix" "$path"
+          }
+          TDB_URL=$(file_url "$work/world.7z") || exit 1
+          DBC_URL=$(file_url "$work/data.zip") || exit 1
+          export TDB_URL TDB_SHA256="$(sha "$work/world.7z")" TDB_MEMBER=tdb.sql
+          export DBC_URL DBC_SHA256="$(sha "$work/data.zip")" DBC_MEMBER=dbc
           just build
       - name: Start release server with fixture database
         run: |

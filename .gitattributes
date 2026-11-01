@@ -1,2 +1,8 @@
+# Repository-wide line-ending policy: normalize text to LF in the index and
+# check it out with LF on every platform, ignoring core.autocrlf/core.eol.
+# Binary detection still applies, so payloads are never converted.
+* text=auto eol=lf
+
+# Binary/LFS payloads: never line-ending converted, diffed, or merged as text.
 data/wotlk.sqlite filter=lfs diff=lfs merge=lfs -text
 builder/vendor/api/codex.json filter=lfs diff=lfs merge=lfs -text

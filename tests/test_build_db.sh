@@ -6,6 +6,17 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/build-db-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1; else shasum -a 256 "$1" | cut -d ' ' -f 1; fi; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
+# curl treats file URL paths as Windows paths under MSYS, not as MSYS
+# virtual paths such as /tmp, so build them from a native absolute path.
+file_url() {
+    local path=$1 prefix=file://
+    if command -v cygpath >/dev/null 2>&1; then
+        path=$(cygpath -m "$path") || return 1
+        prefix=file:///
+    fi
+    path=$(printf '%s' "$path" | sed 's/%/%25/g; s/ /%20/g; s/#/%23/g; s/?/%3F/g') || return 1
+    printf '%s%s\n' "$prefix" "$path"
+}
 fixture() {
     rm -rf "$work/fixture" "$work/cache"
     mkdir -p "$work/fixture/dbc"
@@ -13,8 +24,8 @@ fixture() {
     printf 'fixture DBC' > "$work/fixture/dbc/Spell.dbc"
     bsdtar --format=7zip -cf "$work/world.7z" -C "$work/fixture" world.sql
     bsdtar --format=zip -cf "$work/data.zip" -C "$work/fixture" dbc/Spell.dbc
-    TDB_URL="file://$work/world.7z"; TDB_SHA256=$(sha "$work/world.7z"); TDB_MEMBER=world.sql
-    DBC_URL="file://$work/data.zip"; DBC_SHA256=$(sha "$work/data.zip"); DBC_MEMBER=dbc
+    TDB_URL=$(file_url "$work/world.7z") || fail 'TDB URL'; TDB_SHA256=$(sha "$work/world.7z"); TDB_MEMBER=world.sql
+    DBC_URL=$(file_url "$work/data.zip") || fail 'DBC URL'; DBC_SHA256=$(sha "$work/data.zip"); DBC_MEMBER=dbc
 }
 fixture
 prepare_inputs "$work/cache"
@@ -44,20 +55,34 @@ rm "$SQL_PATH"
 prepare_inputs "$work/cache"
 [ "$(cat "$SQL_PATH")" = 'fixture SQL' ] || fail 'repair cached archive'
 [ "$(sha "$work/cache/TDB-$TDB_SHA256")" = "$TDB_SHA256" ] || fail 'cached archive hash'
+# Literal backslashes are path separators on Windows and MSYS implements
+# `ln -s` as a copy, so these ZIP member names cannot be produced from the
+# filesystem there. Build the same archive from an mtree manifest, whose entry
+# names are independent of the host filesystem.
 fixture
-mkdir -p "$work/fixture/maps" "$work/fixture/dbc/nested"
-printf map > "$work/fixture/maps/Map.dbc"
-printf nested > "$work/fixture/dbc/nested/Other.dbc"
-ln -s target "$work/fixture/dbc/Link.dbc"
-printf escape > "$work/fixture/dbc\\escape.dbc"
-printf injected > "$work/fixture/dbc\\Spell.dbc"
-printf traversal > "$work/escape.dbc"
 rm "$work/data.zip"
-(cd "$work/fixture" && zip -q -y "$work/data.zip" dbc/Spell.dbc dbc/Link.dbc dbc/nested/Other.dbc maps/Map.dbc 'dbc\escape.dbc' 'dbc\Spell.dbc' dbc/../../escape.dbc)
-rm "$work/escape.dbc"
+mkdir -p "$work/archive"
+printf map > "$work/archive/map"
+printf nested > "$work/archive/nested"
+printf escape > "$work/archive/escape"
+printf injected > "$work/archive/injected"
+printf traversal > "$work/archive/traversal"
+printf 'fixture DBC' > "$work/archive/spell"
+cat > "$work/archive/fixture.mtree" <<'EOF'
+#mtree
+dbc/Spell.dbc type=file mode=0644 contents=archive/spell
+dbc/Link.dbc type=link mode=0777 link=target
+dbc/nested/Other.dbc type=file mode=0644 contents=archive/nested
+maps/Map.dbc type=file mode=0644 contents=archive/map
+dbc\134escape.dbc type=file mode=0644 contents=archive/escape
+dbc\134Spell.dbc type=file mode=0644 contents=archive/injected
+dbc/../../escape.dbc type=file mode=0644 contents=archive/traversal
+EOF
+(cd "$work" && bsdtar --format=zip -cf "$work/data.zip" @archive/fixture.mtree)
 DBC_SHA256=$(sha "$work/data.zip")
 prepare_inputs "$work/cache"
 [ "$(cat "$DBC_PATH/Spell.dbc")" = 'fixture DBC' ] || fail 'selected DBC'
+[ ! -e "$DBC_PATH/Link.dbc" ] && [ ! -L "$DBC_PATH/Link.dbc" ] || fail 'symlink DBC selected'
 [ "$(find "$DBC_PATH" -type f | wc -l | tr -d ' ')" = 1 ] || fail 'unsafe DBC selected'
 [ ! -e "$work/escape.dbc" ] || fail 'escaped extraction'
 # ZIP central-directory order differs from local-header order: symlink first in

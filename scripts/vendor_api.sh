@@ -19,7 +19,12 @@ if [ -z "$requested" ] || [[ "$requested" == -* ]]; then
 fi
 
 mkdir -p "$(dirname "$CHECKOUT")"
-if [ ! -e "$CHECKOUT" ]; then
+# The Rust cache strips every file under target/ before saving, so a restored
+# checkout can be a skeleton whose `git -C` silently falls back to the enclosing
+# repository. Reuse a checkout only when it is its own clone of $URL.
+if [ "$(git -C "$CHECKOUT" rev-parse --git-dir 2>/dev/null)" != .git ] ||
+    [ "$(git -C "$CHECKOUT" remote get-url origin 2>/dev/null)" != "$URL" ]; then
+    rm -rf "$CHECKOUT"
     git clone --quiet --no-checkout "$URL" "$CHECKOUT"
 fi
 if ! git -C "$CHECKOUT" cat-file -e "${requested}^{commit}" 2>/dev/null; then
