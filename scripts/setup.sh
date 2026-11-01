@@ -102,7 +102,7 @@ if ! command -v rustup >/dev/null; then
   esac
 fi
 # Install the toolchain and components selected by the root rust-toolchain.toml.
-rustup toolchain install
+rustup show active-toolchain || rustup toolchain install
 case "$os" in
   MSYS*|MINGW*)
     if ! rustc -vV | grep -q '^host: x86_64-pc-windows-msvc$'; then

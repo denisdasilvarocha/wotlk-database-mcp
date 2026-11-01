@@ -119,6 +119,17 @@ impl Fixtures {
                         r.effect_radius_index = [8, 0, 0];
                         r.description_lang = localized("Blasts within $a1 yards.");
                     }),
+                    spell_row(14147, |r| {
+                        r.name_lang = localized("Signed Dice");
+                        r.duration_index = wow_dbc::wrath_tables::spell_duration::SpellDurationKey::new(2);
+                        r.effect = [2, 6, 0];
+                        r.effect_base_points = [1, -761, 0];
+                        r.effect_die_sides = [-3, -79, 0];
+                        r.effect_aura = [AuraMod::None, AuraMod::PeriodicDamage, AuraMod::None];
+                        r.effect_aura_period = [0, 2000, 0];
+                        r.description_lang = localized("Range $s2 minimum $m2 total $o2; crossing $s1 minimum $m1.");
+                        r.aura_description_lang = localized("Range $s2 minimum $m2 total $o2.");
+                    }),
                     spell_row(11366, |r| {
                         r.name_lang = localized("Pyroblast");
                         r.name_subtext_lang = localized("Rank 1");

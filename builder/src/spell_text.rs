@@ -12,6 +12,16 @@ pub(crate) struct SpellNumbers {
     pub(crate) range_max: f64,
 }
 
+pub(crate) fn effect_range(base: i32, sides: i32) -> (i64, i64) {
+    let base = i64::from(base);
+    let sides = i64::from(sides);
+    match sides {
+        0 | 1 => (base + sides, base + sides),
+        ..=-1 => (base + sides, base + 1),
+        _ => (base + 1, base + sides),
+    }
+}
+
 /// Expands supported spell tokens, preserving formulas and unresolved tokens.
 pub(crate) fn resolve<'a>(
     text: &str,
@@ -98,13 +108,17 @@ pub(crate) fn resolve<'a>(
 }
 
 fn append_value(output: &mut String, kind: u8, index: usize, spell: &SpellNumbers) -> bool {
-    let base = i64::from(spell.base_points[index]);
-    let sides = i64::from(spell.die_sides[index]);
-    let low = (base + sides.min(1)).abs();
-    let high = (base + sides).abs();
+    let sides = spell.die_sides[index];
+    let (start, end) = effect_range(spell.base_points[index], sides);
+    let low = if start <= 0 && end >= 0 {
+        0
+    } else {
+        start.abs().min(end.abs())
+    };
+    let high = start.abs().max(end.abs());
     match kind {
         b's' => {
-            if sides <= 1 {
+            if (0..=1).contains(&sides) {
                 let _ = write!(output, "{high}");
             } else {
                 let _ = write!(output, "{low} to {high}");
@@ -128,7 +142,7 @@ fn append_value(output: &mut String, kind: u8, index: usize, spell: &SpellNumber
         }
         b'o' if spell.duration_ms > 0 && spell.period[index] > 0 => {
             let ticks = i64::from(spell.duration_ms / spell.period[index]);
-            if sides <= 1 {
+            if (0..=1).contains(&sides) {
                 let _ = write!(output, "{}", high * ticks);
             } else {
                 let _ = write!(output, "{} to {}", low * ticks, high * ticks);

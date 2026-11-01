@@ -600,13 +600,14 @@ fn import_spells(conn: &Connection, tables: &Tables) -> Result<(), BuildError> {
             let aura = (aura_id != 0)
                 .then(|| names::enum_name(names::AURA_TYPE, i64::from(aura_id)))
                 .flatten();
-            let base = i64::from(s.effect_base_points[i]);
-            let sides = i64::from(s.effect_die_sides[i]);
+            let base = s.effect_base_points[i];
+            let sides = s.effect_die_sides[i];
             let value = (base != 0 || sides != 0).then(|| {
-                if sides <= 1 {
-                    (base + sides).to_string()
+                let (start, end) = crate::spell_text::effect_range(base, sides);
+                if (0..=1).contains(&sides) {
+                    start.to_string()
                 } else {
-                    format!("{}-{}", base + 1, base + sides)
+                    format!("{start}-{end}")
                 }
             });
             let target_a = (s.implicit_target_a[i] != 0)

@@ -101,7 +101,7 @@ Agents use four generic tools: `search`, `get`, `related`, and `sql`. Every tool
 - The zero-argument `just build` validates the bundled offsets, vendors the API at the commit in `builder/vendor/api/COMMIT`, builds the database, and builds the release server with Cargo's lockfile.
 - The zero-argument `just build-db` provisions pinned inputs and invokes the offline builder with `--tdb <dump file>` and `--dbc <folder>`. The vendored offsets and codex data have fixed locations in the repository.
 - Database bootstrap requires Bash, curl, `jq`, Cargo, `bsdtar`, `unzip`, and a SHA-256 utility; it fetches the codex through Git LFS if it is a pointer. It does not install packages. The cache under `target/build-db` verifies archives and extracted files and repairs corrupted entries.
-- `just setup` installs missing tools on macOS with Homebrew, Linux with apt, dnf, or pacman, and native x86_64 Windows from MSYS2 Bash with pacman. macOS requires Xcode Command Line Tools. Native Windows requires Microsoft C++ Build Tools with MSVC and a Windows SDK; cmd, PowerShell, and Git Bash alone are not the native Windows environment. WSL follows the Linux instructions and produces a Linux binary. Setup installs the pinned Rust toolchain and configures Git LFS and prek hooks.
+- `just setup` installs missing tools on macOS with Homebrew, Linux with apt, dnf, or pacman, and native x86_64 Windows from MSYS2 Bash with pacman. macOS requires Xcode Command Line Tools. Native Windows requires Microsoft C++ Build Tools with MSVC and a Windows SDK; cmd, PowerShell, and Git Bash alone are not the native Windows environment. WSL follows the Linux instructions and produces a Linux binary. Setup installs the pinned Rust toolchain and configures Git LFS and prek hooks. It supports existing Rustup installations before and after version 1.28.
 
 ### Inputs and source precedence
 
@@ -136,7 +136,7 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 
 - Curated tables, one per kind. Each table holds only the useful columns, with stable column names. Flags and enums are stored as decoded names, or the formatter decodes them; either way the agent sees names, not bit masks. There is no raw mirror of the source tables.
 - Offsets are stored with qualified name, domain, platform, VA, RVA (VA minus image base 0x00400000), status, and raw comment. Status is a closed enum: `verified`, `unverified`, `uncertain`, `label_unverified`, `not_present`. Explicit rules map the catalog's inconsistent caveat markers to these values. An entry with no caveat is `verified`. The raw comment is always kept.
-- Spells store both the raw description and the resolved description. The resolver handles `$s`, `$m`, `$d`, `$o`, `$t`, `$a`, `$x`, `$r`, and references to other spells (for example `$12345s1`). Formulas (`${...}`) and `$l`/`$g` conditionals are left unchanged.
+- Spells store both the raw description and the resolved description. The resolver handles `$s`, `$m`, `$d`, `$o`, `$t`, `$a`, `$x`, `$r`, and references to other spells (for example `$12345s1`). Formulas (`${...}`) and `$l`/`$g` conditionals are left unchanged. Negative die sides preserve the full signed effect range. Resolved `$s` and `$o` show ascending magnitude ranges. `$m` uses the minimum magnitude, including zero when the range crosses zero.
 - One unified FTS5 search table holds every searchable entity as (kind, id, name, subtext). It uses the `unicode61 remove_diacritics` tokenizer and a prefix index.
 - A `meta` table records the TDB release, the dump's sha256, the client build, the codex commit, the offsets copy date, and the builder version.
 
@@ -153,7 +153,7 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 - `related(kind, id, relation)`: returns linked records as compact lines. Supported relations:
   - item: `dropped_by` (with chance), `sold_by` (with cost), `reward_of`, `set` (with bonuses), `created_by`, `disenchant`.
   - creature: `loot`, `sells`, `trains`, `starts_quests`, `ends_quests`, `spawns`, `spells`.
-  - quest: `givers`, `enders`, `chain`, `rewards`, `requirements`.
+  - quest: `givers`, `enders`, `chain`, `rewards`, `requirements`. The `chain` relation uses `exclusive` for positive groups and `group_all` for negative groups. It reports `must_be_active=1` in both directions when `prev_quest` is negative.
   - spell: `ranks`, `taught_by`, `used_by`, `talent`, `glyph`, `triggered`.
   - gameobject: `loot`, `spawns`. area: `children`, `parent`. faction: `members`. achievement: `criteria`.
 - `sql(query, limit?)`: one read-only statement only. Default 200 rows, maximum 1000. A progress handler stops the query after 2 seconds. When rows are cut, the output says so.

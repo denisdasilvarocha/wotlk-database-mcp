@@ -162,6 +162,33 @@ async fn spells_resolve_descriptions_and_keep_raw_tokens() {
 }
 
 #[tokio::test]
+async fn negative_spell_dice_resolve_signed_effect_and_absolute_tooltip_ranges() {
+    let spell = success(
+        "get",
+        json!({"kind":"spell","id":14147,"fields":["effect1","effect2","aura_text"]}),
+    )
+    .await;
+    lines_include(
+        &spell,
+        &[
+            "description=Range 760 to 840 minimum 760 total 1520 to 1680; crossing 0 to 2 minimum 0.",
+            "aura_text=Range 760 to 840 minimum 760 total 1520 to 1680.",
+            "effect1=SCHOOL_DAMAGE value=-2-2",
+            "effect2=APPLY_AURA PERIODIC_DAMAGE value=-840--760 period=2000",
+        ],
+    );
+    let effects = success(
+        "sql",
+        json!({"query":"SELECT idx, value, base_points, die_sides FROM spell_effect WHERE spell_id = 14147 ORDER BY idx"}),
+    )
+    .await;
+    assert_eq!(
+        effects,
+        "idx\tvalue\tbase_points\tdie_sides\n1\t-2-2\t1\t-3\n2\t-840--760\t-761\t-79"
+    );
+}
+
+#[tokio::test]
 async fn offsets_preserve_addresses_and_statuses() {
     let offset = success(
         "get",
@@ -479,6 +506,39 @@ async fn all_relations_return_linked_fixture_records() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn quest_chain_distinguishes_negative_and_positive_exclusive_groups() {
+    let negative = success("related", json!({"kind":"quest","id":1001,"relation":"chain"})).await;
+    assert!(
+        negative.contains("quest 1004 Active Fiery Path link=group_all"),
+        "{negative}"
+    );
+    let reverse = success("related", json!({"kind":"quest","id":1004,"relation":"chain"})).await;
+    assert!(
+        reverse.contains("quest 1001 The Fiery Path link=group_all"),
+        "{reverse}"
+    );
+    let positive = success("related", json!({"kind":"quest","id":1002,"relation":"chain"})).await;
+    assert!(
+        positive.contains("quest 1003 Another Fiery Path link=exclusive"),
+        "{positive}"
+    );
+}
+
+#[tokio::test]
+async fn quest_chain_marks_active_previous_in_both_directions() {
+    let previous = success("related", json!({"kind":"quest","id":1004,"relation":"chain"})).await;
+    assert!(
+        previous.contains("quest 1001 The Fiery Path link=previous must_be_active=1"),
+        "{previous}"
+    );
+    let follow_up = success("related", json!({"kind":"quest","id":1001,"relation":"chain"})).await;
+    assert!(
+        follow_up.contains("quest 1004 Active Fiery Path link=follow_up must_be_active=1"),
+        "{follow_up}"
+    );
 }
 
 #[tokio::test]
