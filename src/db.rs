@@ -7,7 +7,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rusqlite::{Connection, Error, ErrorCode, OpenFlags, limits::Limit, params, types::Value};
+use rusqlite::{
+    Connection, Error, ErrorCode, OpenFlags,
+    hooks::{AuthAction, AuthContext, Authorization},
+    limits::Limit,
+    params,
+    types::Value,
+};
 
 use crate::{
     format,
@@ -21,8 +27,9 @@ pub(crate) struct Database {
 
 #[derive(Debug)]
 pub(crate) enum QueryError {
-    Invalid(String),
+    /// Returned to the model as a failed tool call (`isError`).
     Tool(String),
+    /// Returned as a JSON-RPC internal error.
     Internal(String),
 }
 
@@ -34,9 +41,11 @@ impl From<Error> for QueryError {
 
 impl Database {
     pub(crate) fn open(path: &Path) -> rusqlite::Result<Self> {
-        let conn =
+        let mut conn =
             Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         conn.pragma_update(None, "query_only", true)?;
+        // Installed after the pragma above, which is itself an assignment.
+        conn.authorizer(Some(read_only_authorizer))?;
         conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0)?;
         conn.query_row("SELECT value FROM meta WHERE name = 'client_build'", [], |row| {
             row.get::<_, String>(0)
@@ -56,13 +65,46 @@ impl Database {
     }
 }
 
+/// Pragmas that inspect the schema or the database; their argument is not an assignment.
+const READ_ONLY_PRAGMAS: &[&str] = &[
+    "table_info",
+    "table_xinfo",
+    "table_list",
+    "index_info",
+    "index_xinfo",
+    "index_list",
+    "foreign_key_list",
+    "foreign_key_check",
+    "integrity_check",
+    "quick_check",
+    "pragma_list",
+];
+
+/// Denies the statements that the read-only statement check cannot see.
+///
+/// `PRAGMA name = value` and transaction control are not writes to a table, so
+/// `Statement::readonly` accepts them; `ATTACH` and `DETACH` would open another file.
+fn read_only_authorizer(context: AuthContext<'_>) -> Authorization {
+    match context.action {
+        AuthAction::Pragma {
+            pragma_name,
+            pragma_value: Some(_),
+        } if !READ_ONLY_PRAGMAS.contains(&pragma_name) => Authorization::Deny,
+        AuthAction::Transaction { .. }
+        | AuthAction::Savepoint { .. }
+        | AuthAction::Attach { .. }
+        | AuthAction::Detach { .. } => Authorization::Deny,
+        _ => Authorization::Allow,
+    }
+}
+
 fn record_id(kind: Kind, id: RecordId) -> Result<Value, QueryError> {
     if kind.key() == "id" {
         let number = match id {
             RecordId::Number(n) => n,
             RecordId::Text(text) => text
                 .parse()
-                .map_err(|_| QueryError::Invalid(format!("kind {} needs a numeric id", kind.as_str())))?,
+                .map_err(|_| QueryError::Tool(format!("kind {} needs a numeric id", kind.as_str())))?,
         };
         Ok(Value::Integer(number))
     } else {
@@ -84,7 +126,7 @@ fn id_text(id: &Value) -> String {
 fn bounded_limit(limit: Option<u32>, default: u32, max: u32) -> Result<u32, QueryError> {
     let limit = limit.unwrap_or(default);
     if limit == 0 || limit > max {
-        return Err(QueryError::Invalid(format!("limit must be between 1 and {max}")));
+        return Err(QueryError::Tool(format!("limit must be between 1 and {max}")));
     }
     Ok(limit)
 }
@@ -96,18 +138,32 @@ pub(crate) fn search(
     limit: Option<u32>,
 ) -> Result<String, QueryError> {
     let text = text.trim();
+    // The FTS prefix index starts at two characters, so one-character tokens match exactly.
     let tokens: Vec<_> = text
         .split(|c: char| !c.is_alphanumeric())
         .filter(|s| !s.is_empty())
-        .map(|s| format!("\"{s}\"*"))
+        .map(|s| {
+            if s.chars().count() > 1 {
+                format!("\"{s}\"*")
+            } else {
+                format!("\"{s}\"")
+            }
+        })
         .collect();
     if tokens.is_empty() {
-        return Err(QueryError::Invalid(
+        return Err(QueryError::Tool(
             "search text needs at least one letter or digit".to_owned(),
         ));
     }
     let limit = bounded_limit(limit, 20, 100)?;
-    let mut stmt = conn.prepare("SELECT kind, id, name, subtext FROM search WHERE search MATCH ?1 AND (?3 IS NULL OR kind = ?3) ORDER BY CASE WHEN lower(name) = lower(?2) THEN 0 WHEN substr(lower(name), 1, length(?2)) = lower(?2) THEN 1 ELSE 2 END, bm25(search, 10.0, 1.0), length(name), kind, id LIMIT ?4")?;
+    let mut stmt = conn.prepare(
+        "SELECT kind, id, name, subtext FROM search \
+         WHERE search MATCH ?1 AND (?3 IS NULL OR kind = ?3) \
+         ORDER BY CASE WHEN lower(name) = lower(?2) THEN 0 \
+                       WHEN substr(lower(name), 1, length(?2)) = lower(?2) THEN 1 ELSE 2 END, \
+                  priority, bm25(search, 10.0, 1.0), length(name), kind, CAST(id AS INTEGER), id \
+         LIMIT ?4",
+    )?;
     let mut rows = stmt.query(params![tokens.join(" "), text, kind.map(Kind::as_str), limit])?;
     let mut lines = Vec::new();
     while let Some(row) = rows.next()? {
@@ -127,7 +183,7 @@ pub(crate) fn search(
     }
     if lines.is_empty() {
         let suffix = kind.map_or_else(String::new, |k| format!(" of kind {}", k.as_str()));
-        return Err(QueryError::Tool(format!("no matches for \"{text}\"{suffix}")));
+        return Ok(format!("no matches for \"{text}\"{suffix}"));
     }
     Ok(lines.join("\n"))
 }
@@ -153,7 +209,7 @@ pub(crate) fn get(
     }
     let id = record_id(
         kind,
-        id.ok_or_else(|| QueryError::Invalid(format!("kind {} needs an id", kind.as_str())))?,
+        id.ok_or_else(|| QueryError::Tool(format!("kind {} needs an id", kind.as_str())))?,
     )?;
     let mut stmt = conn.prepare(&format!("SELECT * FROM {} WHERE {} = ?1", kind.table(), kind.key()))?;
     let columns: Vec<String> = stmt.column_names().map(str::to_owned).collect();
@@ -161,7 +217,7 @@ pub(crate) fn get(
     if !all {
         for field in fields.into_iter().flatten() {
             if !columns.contains(field) {
-                return Err(QueryError::Invalid(format!(
+                return Err(QueryError::Tool(format!(
                     "unknown field '{field}' for {}; fields: {}",
                     kind.as_str(),
                     columns.join(", ")
@@ -198,6 +254,7 @@ pub(crate) fn related(
     kind: Kind,
     id: RecordId,
     relation: Relation,
+    limit: Option<u32>,
 ) -> Result<String, QueryError> {
     let relations = kind.relations();
     let Some((_, query)) = relations.iter().find(|(r, _)| *r == relation) else {
@@ -211,7 +268,7 @@ pub(crate) fn related(
                 kind.as_str()
             )
         };
-        return Err(QueryError::Invalid(message));
+        return Err(QueryError::Tool(message));
     };
     let id = record_id(kind, id)?;
     let exists = conn
@@ -224,14 +281,16 @@ pub(crate) fn related(
             id_text(&id)
         )));
     }
+    let limit = bounded_limit(limit, 50, 1000)? as usize;
     let mut stmt = conn.prepare(query)?;
     let columns: Vec<String> = stmt.column_names().map(str::to_owned).collect();
     let mut rows = stmt.query([&id])?;
     let mut lines = Vec::new();
+    let mut total = 0_usize;
     while let Some(row) = rows.next()? {
-        if lines.len() == 200 {
-            lines.push("-- truncated: first 200 lines shown; use the sql tool for the full list".to_owned());
-            break;
+        total += 1;
+        if lines.len() == limit {
+            continue;
         }
         let mut line = format!("{} {}", format::value(row.get_ref(0)?), format::value(row.get_ref(1)?));
         let name = row.get_ref(2)?;
@@ -247,20 +306,23 @@ pub(crate) fn related(
         }
         lines.push(line);
     }
-    if lines.is_empty() {
-        return Err(QueryError::Tool(format!(
+    if total == 0 {
+        return Ok(format!(
             "no {} for {} {}",
             relation.as_str(),
             kind.as_str(),
             id_text(&id)
-        )));
+        ));
+    }
+    if total > limit {
+        lines.push(format!("-- {limit} of {total} shown; raise limit (max 1000)"));
     }
     Ok(lines.join("\n"))
 }
 
 pub(crate) fn sql(conn: &mut Connection, query: &str, limit: Option<u32>) -> Result<String, QueryError> {
     if query.trim().is_empty() {
-        return Err(QueryError::Invalid("query is empty".to_owned()));
+        return Err(QueryError::Tool("query is empty".to_owned()));
     }
     let limit = bounded_limit(limit, 200, 1000)? as usize;
     let start = Instant::now();
@@ -272,11 +334,15 @@ pub(crate) fn sql(conn: &mut Connection, query: &str, limit: Option<u32>) -> Res
 
 fn execute_sql(conn: &Connection, query: &str, limit: usize) -> Result<String, QueryError> {
     let mut stmt = conn.prepare(query).map_err(|error| match error {
-        Error::MultipleStatement => QueryError::Invalid("only one statement is allowed".to_owned()),
-        other => QueryError::Invalid(format!("invalid SQL: {other}")),
+        Error::MultipleStatement => QueryError::Tool("only one statement is allowed".to_owned()),
+        other => QueryError::Tool(match other.sqlite_error_code() {
+            // The authorizer in `Database::open` rejects pragma assignments and transactions.
+            Some(ErrorCode::AuthorizationForStatementDenied) => "only read-only statements are allowed".to_owned(),
+            _ => format!("invalid SQL: {other}"),
+        }),
     })?;
     if !stmt.readonly() {
-        return Err(QueryError::Invalid("only read-only statements are allowed".to_owned()));
+        return Err(QueryError::Tool("only read-only statements are allowed".to_owned()));
     }
     let columns: Vec<String> = stmt.column_names().map(format::escape).collect();
     let count = columns.len();
@@ -296,15 +362,19 @@ fn execute_sql(conn: &Connection, query: &str, limit: usize) -> Result<String, Q
         lines.push(values.join("\t"));
     }
     if lines.len() == 1 {
-        return Err(QueryError::Tool("query returned no rows".to_owned()));
+        lines.push("-- no rows".to_owned());
     }
     Ok(lines.join("\n"))
 }
 
 fn sql_error(error: &Error) -> QueryError {
-    if error.sqlite_error_code() == Some(ErrorCode::OperationInterrupted) {
-        QueryError::Tool("query stopped after 2 seconds; narrow it".to_owned())
-    } else {
-        QueryError::Tool(format!("SQL error: {error}"))
+    match error.sqlite_error_code() {
+        Some(ErrorCode::OperationInterrupted) => {
+            QueryError::Tool("query stopped after 2 seconds; narrow it".to_owned())
+        }
+        Some(ErrorCode::AuthorizationForStatementDenied) => {
+            QueryError::Tool("only read-only statements are allowed".to_owned())
+        }
+        _ => QueryError::Tool(format!("SQL error: {error}")),
     }
 }

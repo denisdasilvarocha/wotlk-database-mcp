@@ -137,7 +137,8 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 - Curated tables, one per kind. Each table holds only the useful columns, with stable column names. Flags and enums are stored as decoded names, or the formatter decodes them; either way the agent sees names, not bit masks. There is no raw mirror of the source tables.
 - Offsets are stored with qualified name, domain, platform, VA, RVA (VA minus image base 0x00400000), status, and raw comment. Status is a closed enum: `verified`, `unverified`, `uncertain`, `label_unverified`, `not_present`. Explicit rules map the catalog's inconsistent caveat markers to these values. An entry with no caveat is `verified`. The raw comment is always kept.
 - Spells store both the raw description and the resolved description. The resolver handles `$s`, `$m`, `$d`, `$o`, `$t`, `$a`, `$x`, `$r`, and references to other spells (for example `$12345s1`). Formulas (`${...}`) and `$l`/`$g` conditionals are left unchanged. Negative die sides preserve the full signed effect range. Resolved `$s` and `$o` show ascending magnitude ranges. `$m` uses the minimum magnitude, including zero when the range crosses zero.
-- One unified FTS5 search table holds every searchable entity as (kind, id, name, subtext). It uses the `unicode61 remove_diacritics` tokenizer and a prefix index.
+- One unified FTS5 search table holds every searchable entity as (name, terms, kind, id, subtext, priority). Only `name` and `terms` are indexed; `terms` holds split identifier words and extra words such as spell rank and family or creature title. `priority` ranks player-learnable spells and spawned creatures above NPC copies. It uses the `unicode61 remove_diacritics` tokenizer and a prefix index for 2 and 3 characters.
+- Icon columns of spells, skills, glyphs, achievements, and talent tabs store the icon name without the `Interface\Icons\` prefix, as item icons do. The `spell_icon` table keeps the raw texture path.
 - A `meta` table records the TDB release, the dump's sha256, the client build, the codex commit, the offsets copy date, and the builder version.
 
 ### Server runtime
@@ -148,20 +149,22 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 
 ### Tool contract
 
-- `search(text, kind?, limit?)`: queries the unified index. Exact and prefix name matches rank first, then FTS5 `bm25`. Default limit 20, maximum 100. One line per hit: `kind id name [subtext]`.
+- `search(text, kind?, limit?)`: queries the unified index. Order: exact name, then name prefix, then the index `priority` (0 for player-learnable spells, which are in `spell_rank`, `skill_ability`, or `trainer_spell`, and for creatures with a spawn; 1 for the rest), then FTS5 `bm25`, shorter name, kind, and numeric id. A 1-character word matches whole tokens only, because the prefix index starts at 2 characters. Default limit 20, maximum 100. One line per hit: `kind id name [subtext]`. Spell subtext is rank and family (`Rank 1 MAGE`); creature subtext is title, level, and rank (`Mage Trainer, level 60`, `level 63 WORLDBOSS`). Creature level and rank are not indexed as search terms. `kind` accepts every kind except `meta`.
 - `get(kind, id, fields?)`: returns one record. Each kind has a curated summary field set. `fields` adds named fields, or `all` returns every curated field. Fields that are zero, empty, or default are always left out.
-- `related(kind, id, relation)`: returns linked records as compact lines. Supported relations:
-  - item: `dropped_by` (with chance), `sold_by` (with cost), `reward_of`, `set` (with bonuses), `created_by`, `disenchant`.
-  - creature: `loot`, `sells`, `trains`, `starts_quests`, `ends_quests`, `spawns`, `spells`.
-  - quest: `givers`, `enders`, `chain`, `rewards`, `requirements`. The `chain` relation uses `exclusive` for positive groups and `group_all` for negative groups. It reports `must_be_active=1` in both directions when `prev_quest` is negative.
+- `related(kind, id, relation, limit?)`: returns linked records as compact lines: `kind id name`, then extra `col=value` fields. Default limit 50, maximum 1000. When rows are cut, the last line is `-- <shown> of <total> shown; raise limit (max 1000)`. `kind` accepts only kinds that have relations. Supported relations:
+  - item: `dropped_by` (with chance), `sold_by` (with cost), `reward_of`, `set` (with bonuses), `created_by`, `disenchant`. `dropped_by` follows reference loot up to 5 levels to the creatures, gameobjects, and items that use it; such rows carry `via=<innermost reference>` and the item's chance inside that reference. It shows no bare reference rows.
+  - creature: `loot`, `sells`, `trains`, `starts_quests`, `ends_quests`, `spawns`, `spells`. In `loot` (and gameobject `loot`, item `disenchant`), each `reference N` row is followed by its items, up to 5 levels, each with `via=N`.
+  - quest: `givers`, `enders`, `chain`, `rewards`, `requirements`. `chain` returns the whole chain from first to last: ancestors through `prev_quest`, descendants through `next_quest`, `reward_next_quest`, and follow-ups, up to 50 steps each way. Each row has `step=` relative to the queried quest (0 is the quest itself with `link=self`). The relation uses `exclusive` for positive groups and `group_all` for negative groups. It reports `must_be_active=1` in both directions when `prev_quest` is negative.
   - spell: `ranks`, `taught_by`, `used_by`, `talent`, `glyph`, `triggered`.
   - gameobject: `loot`, `spawns`. area: `children`, `parent`. faction: `members`. achievement: `criteria`.
-- `sql(query, limit?)`: one read-only statement only. Default 200 rows, maximum 1000. A progress handler stops the query after 2 seconds. When rows are cut, the output says so.
+  - Creature rows of `sold_by`, `taught_by`, `givers`, and `enders` carry `faction=` and `zone=`: the zone of the creature's lowest-GUID spawn, or its map name when the spawn has no zone id (most TDB 335 spawns).
+- `sql(query, limit?)`: one read-only statement only. Default 200 rows, maximum 1000. A progress handler stops the query after 2 seconds. When rows are cut, the output says so. A statement with no rows returns the header and `-- no rows`. An SQLite authorizer also denies pragma assignments, transaction control, and `ATTACH`/`DETACH`; read-only pragmas such as `table_info` stay allowed.
 - Kinds: item, creature, spell, itemset, quest, gameobject, map, area, faction, talent, skill, glyph, achievement, offset, lua_function, lua_event, widget, cvar, lua_type, combatlog_event, secure_template, and `meta`.
-- The builder includes a comment for every column in each `CREATE TABLE` statement. Agents read the schema with `SELECT sql FROM sqlite_schema WHERE type = 'table'`.
+- The builder includes a comment for every column in each `CREATE TABLE` statement. Agents read one table's schema with `SELECT sql FROM sqlite_schema WHERE name = '<table>'`.
 - The `sql` tool returns a tab-separated header and rows, with `NULL` for null values. Other tools return compact `key=value` text, never JSON structured output.
-- Errors follow the project rule. An unknown kind, an unknown relation, or a malformed SQL statement is `invalid_params`. A missing ID, an empty result, or an SQL runtime error is a tool error result that the model can read.
-- The server `instructions` text lists every kind and relation, so agents need no discovery call.
+- Errors: arguments that fail to deserialize (unknown kind or relation name, missing field, wrong type) and unknown tools are `invalid_params`. Every error raised inside a tool is a tool error result (`isError: true`) that the model can read, as the MCP 2025-11-25 spec requires for input validation errors: a relation that is not valid for the kind, an unknown field, a wrong id type, an out-of-range limit, invalid or writing SQL, a missing ID, or an SQL runtime error. An empty result is a success: `no matches for "<text>"`, `no <relation> for <kind> <id>`, or the SQL header with `-- no rows`.
+- Tool descriptions start with the game and build. Every tool has a `title` and the annotations `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, `openWorldHint=false`.
+- The server `instructions` text names the game and its uses, and lists every kind, relation, and table, so agents need no discovery call.
 
 ### Storage in git
 
@@ -179,10 +182,11 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
   - the spell resolver: `get` on a spell shows resolved values, and formulas stay unchanged.
   - offset status: each caveat marker shows the correct status enum.
   - precedence: a server-only `spell_dbc` row is not found; `Item.dbc` fills only missing items.
-  - ranking: an exact match ranks above prefix and partial matches.
-  - every relation listed in the tool contract.
-  - `sql`: read-only refusal, row cap, and truncation notice.
-  - errors: `invalid_params` and tool-error cases.
+  - ranking: an exact match ranks above prefix and partial matches; a player-learnable spell ranks above an NPC copy with the same name; a 1-letter search matches whole tokens.
+  - every relation listed in the tool contract, including reference loot through one and two levels, the whole quest chain, and the `faction=`/`zone=` fields.
+  - `sql`: read-only refusal (including pragma assignments and transactions), row cap, truncation notice, and the empty result.
+  - errors: `invalid_params` for malformed arguments, and tool errors for bad values and missing records.
+  - `tools/list`: read-only annotations and kind enums without unusable kinds.
   - `meta`: build provenance.
   - default omission: zero and default fields are not in the output.
 - The builder's input checks have tests too. A wrong build or a missing input makes the entry point return an error, and no database file is left behind.

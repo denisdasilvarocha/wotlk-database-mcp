@@ -165,6 +165,11 @@ impl Fixtures {
                         r.name_lang = localized("Fiery Regalia Bonus");
                         r.name_subtext_lang = localized("");
                     }),
+                    // NPC copy of Fireball: shares the name but is not in spell_ranks,
+                    // skill_line_ability, or trainer_spell, so search ranks it below rank spells.
+                    spell_row(9053, |r| {
+                        r.name_lang = localized("Fireball");
+                    }),
                 ],
             },
             spell_duration: SpellDuration {

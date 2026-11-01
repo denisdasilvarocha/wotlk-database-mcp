@@ -588,3 +588,21 @@ CREATE TABLE `spell_dbc` (
 LOCK TABLES `spell_dbc` WRITE;
 INSERT INTO `spell_dbc` VALUES (90000,'Server Only Spell');
 UNLOCK TABLES;
+
+-- Additional search-subtext fixture: leveled creatures with no spawn (priority 1).
+INSERT INTO `creature_template` VALUES (5003,0,0,0,0,'Obsidia','Broodmother',60,63,0,11,0,1,1.14286,1,3,0,0,0,0,0,0,0,0,0,0,'',1,1,1,1,0,''),
+(5004,0,0,0,0,'Emberclaw','',63,63,0,11,0,1,1.14286,1,3,0,0,0,0,0,0,0,0,0,0,'',1,1,1,1,0,'');
+
+-- Reference loot chain: item 19022 sits in reference 10001, which reference 10002
+-- includes; creature 12056 uses both reference tables.
+INSERT INTO `reference_loot_template` VALUES (10001,19022,0,25,0,1,0,1,1),(10002,0,10001,50,0,1,0,1,1);
+INSERT INTO `creature_loot_template` VALUES (12056,0,10002,100,0,1,0,1,1);
+
+-- A trainer spawn, so taught_by rows can report a zone.
+INSERT INTO `creature` VALUES (3,5001,0,12,87,0,0,0,0,0);
+-- A vendor spawn without a zone id, as in most TDB 335 spawns, so rows fall back to the map name.
+INSERT INTO `creature` VALUES (4,5000,0,0,0,0,0,0,0,0);
+
+-- Third quest of the Fiery Path chain: 1001 -> 1002 -> 1005.
+INSERT INTO `quest_template` VALUES (1005,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'Into the Fire','','','','',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'','','','');
+INSERT INTO `quest_template_addon` VALUES (1005,0,0,0,1002,0,0,0,0,0,0,0,0,0,0);

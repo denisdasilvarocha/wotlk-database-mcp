@@ -104,6 +104,15 @@ fn txt(value: &str) -> Option<&str> {
     (!value.is_empty()).then_some(value)
 }
 
+/// Strips the client icon folder so stored icons match item icon names.
+fn icon_name(path: &str) -> &str {
+    const PREFIX: &str = "Interface\\Icons\\";
+    match path.get(..PREFIX.len()) {
+        Some(head) if head.eq_ignore_ascii_case(PREFIX) => &path[PREFIX.len()..],
+        _ => path,
+    }
+}
+
 /// Converts the shortest decimal form of a DBC float without binary f32 noise.
 fn real(value: f32) -> f64 {
     value.to_string().parse().unwrap_or_else(|_| f64::from(value))
@@ -262,7 +271,7 @@ fn import_world(conn: &Connection, tables: &Tables, spell_names: &HashMap<i32, S
         .iter()
         .map(|r| (r.id.id, r.name_lang.en_gb.as_str()))
         .collect();
-    let icon = |id: i32| icons.get(&id).and_then(|s| txt(s));
+    let icon = |id: i32| icons.get(&id).and_then(|s| txt(s)).map(icon_name);
     let spell_name = |id: i32| spell_names.get(&id).and_then(|s| txt(s));
 
     {
@@ -576,7 +585,10 @@ fn import_spells(conn: &Connection, tables: &Tables) -> Result<(), BuildError> {
         let range = ranges.get(&s.range_index);
         let duration = durations.get(&s.duration_index.id).map(|d| d.duration);
         let cast = casts.get(&s.casting_time_index.id).map(|c| c.base);
-        let icon = icons.get(&s.spell_icon_id.id).and_then(|i| txt(&i.texture_filename));
+        let icon = icons
+            .get(&s.spell_icon_id.id)
+            .and_then(|i| txt(&i.texture_filename))
+            .map(icon_name);
         let power = (s.mana_cost > 0 || s.mana_cost_pct > 0 || s.mana_per_second > 0)
             .then(|| names::enum_name(names::POWERS, i64::from(s.power_type)))
             .flatten();

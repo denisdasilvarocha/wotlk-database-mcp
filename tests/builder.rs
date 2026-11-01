@@ -2,11 +2,14 @@
 
 mod common;
 
+use rusqlite::{Connection, params, types::FromSql};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 use wotlk_db_builder::{Inputs, build};
+use wow_dbc::wrath_tables::spell_icon::SpellIconKey;
 
 fn inputs(name: &str) -> (PathBuf, Inputs) {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
@@ -104,4 +107,163 @@ fn rejects_cyclic_vendor_references_without_leaving_output() {
     inputs.tdb = dir.join("vendor-cycle.sql");
     fs::write(&inputs.tdb, dump).unwrap();
     assert_failure(&inputs, &dir, "cyclic vendor reference");
+}
+
+/// Builds one database from the fixtures with a spell family and icon rows that
+/// exercise the search subtext and icon normalization.
+#[expect(clippy::expect_used, reason = "fixture setup must fail loudly on invalid input")]
+fn fixture_db() -> &'static Path {
+    static DB: OnceLock<PathBuf> = OnceLock::new();
+    DB.get_or_init(|| {
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("builder-fixture");
+        let inputs = common::write_inputs(&dir, |fixtures| {
+            let fireball = fixtures
+                .spell
+                .rows
+                .iter_mut()
+                .find(|row| row.id.id == 133)
+                .expect("fixture spell 133");
+            fireball.spell_class_set = 3;
+            for row in &mut fixtures.skill_line.rows {
+                row.spell_icon_id = SpellIconKey::new(1);
+            }
+            fixtures
+                .talent_tab
+                .rows
+                .first_mut()
+                .expect("fixture talent tab")
+                .spell_icon_id = SpellIconKey::new(1);
+            fixtures
+                .achievement
+                .rows
+                .first_mut()
+                .expect("fixture achievement")
+                .icon_id = SpellIconKey::new(1);
+            fixtures
+                .spell_icon
+                .rows
+                .first_mut()
+                .expect("fixture spell icon")
+                .texture_filename = r"interface\ICONS\Spell_Fire_FlameBolt".into();
+        });
+        let db = dir.join("wotlk.sqlite");
+        build(&inputs, &db).expect("build fixture database");
+        db
+    })
+}
+
+#[expect(clippy::expect_used, reason = "a missing fixture row must fail the acceptance test")]
+fn read<T: FromSql>(sql: &str, parameters: impl rusqlite::Params) -> T {
+    Connection::open(fixture_db())
+        .expect("open fixture database")
+        .query_row(sql, parameters, |row| row.get(0))
+        .expect("fixture row")
+}
+
+fn search_value<T: FromSql>(kind: &str, id: &str, column: &str) -> T {
+    read(
+        &format!("SELECT {column} FROM search WHERE kind = ?1 AND id = ?2"),
+        params![kind, id],
+    )
+}
+
+fn icon(table: &str, id: i64) -> Option<String> {
+    read(&format!("SELECT icon FROM {table} WHERE id = ?1"), params![id])
+}
+
+#[test]
+fn search_priority_puts_player_spells_and_spawned_creatures_first() {
+    assert_eq!(search_value::<i64>("spell", "133", "priority"), 0, "player spell");
+    assert_eq!(search_value::<i64>("spell", "14147", "priority"), 1, "NPC spell copy");
+    assert_eq!(
+        search_value::<i64>("creature", "12056", "priority"),
+        0,
+        "spawned creature"
+    );
+    assert_eq!(
+        search_value::<i64>("creature", "5004", "priority"),
+        1,
+        "unspawned creature"
+    );
+    assert_eq!(search_value::<i64>("item", "19019", "priority"), 0, "other kinds");
+}
+
+#[test]
+fn search_spell_subtext_holds_rank_and_family() {
+    assert_eq!(
+        search_value::<Option<String>>("spell", "133", "subtext").as_deref(),
+        Some("Rank 1 MAGE")
+    );
+    assert_eq!(search_value::<Option<String>>("spell", "14147", "subtext"), None);
+    assert_eq!(search_value::<String>("spell", "133", "terms"), "Rank 1 MAGE");
+}
+
+#[test]
+fn search_creature_subtext_holds_level_and_rank_but_terms_do_not() {
+    assert_eq!(
+        search_value::<Option<String>>("creature", "5003", "subtext").as_deref(),
+        Some("Broodmother, level 60-63 WORLDBOSS")
+    );
+    assert_eq!(
+        search_value::<Option<String>>("creature", "5004", "subtext").as_deref(),
+        Some("level 63 WORLDBOSS")
+    );
+    assert_eq!(
+        search_value::<Option<String>>("creature", "5001", "subtext").as_deref(),
+        Some("Mage Trainer")
+    );
+    let terms = search_value::<String>("creature", "5003", "terms");
+    assert_eq!(terms, "Broodmother");
+    assert!(!terms.contains("level"), "{terms}");
+    assert!(!terms.contains("WORLDBOSS"), "{terms}");
+    assert_eq!(
+        search_value::<Option<String>>("creature", "12056", "subtext").as_deref(),
+        Some("WORLDBOSS"),
+        "a creature without a subname still shows its rank"
+    );
+    assert_eq!(
+        search_value::<String>("creature", "12056", "terms"),
+        "",
+        "rank text stays out of terms"
+    );
+}
+
+#[test]
+fn import_strips_the_interface_icons_prefix_from_client_icons() {
+    for (table, id) in [
+        ("spell", 133),
+        ("skill", 8),
+        ("glyph", 1),
+        ("achievement", 6),
+        ("talent_tab", 41),
+    ] {
+        assert_eq!(icon(table, id).as_deref(), Some("Spell_Fire_FlameBolt"), "{table} {id}");
+    }
+    assert_eq!(
+        icon("item", 19019).as_deref(),
+        Some("INV_Sword_39"),
+        "bare icon names stay unchanged"
+    );
+}
+
+#[test]
+fn schema_documents_loot_groups_and_icon_names() {
+    let conn = Connection::open(fixture_db()).expect("open fixture database");
+    let loot: String = conn
+        .query_row("SELECT sql FROM sqlite_schema WHERE name = 'loot'", params![], |row| {
+            row.get(0)
+        })
+        .expect("loot schema");
+    assert!(
+        loot.contains("Drop chance percentage; 0 inside a group means an equal share of the group's remaining chance."),
+        "{loot}"
+    );
+    for table in ["spell", "skill", "glyph", "achievement", "talent_tab"] {
+        let sql: String = conn
+            .query_row("SELECT sql FROM sqlite_schema WHERE name = ?1", params![table], |row| {
+                row.get(0)
+            })
+            .expect("table schema");
+        assert!(sql.contains("-- Icon name."), "{table}: {sql}");
+    }
 }

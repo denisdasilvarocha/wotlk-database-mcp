@@ -118,7 +118,7 @@ CREATE TABLE spell (
   proc_chance INTEGER, -- Proc chance percentage.
   proc_charges INTEGER, -- Proc charge count.
   max_stack INTEGER, -- Maximum aura stacks.
-  icon TEXT, -- Spell icon texture path.
+  icon TEXT, -- Icon name.
   attributes TEXT, -- Decoded attribute flags separated by |.
   mechanic TEXT, -- Decoded mechanic name.
   dispel TEXT, -- Decoded dispel type.
@@ -248,7 +248,7 @@ CREATE TABLE skill (
   name TEXT, -- Skill display name.
   category TEXT, -- Decoded skill category.
   description TEXT, -- Skill description.
-  icon TEXT, -- Skill icon texture path.
+  icon TEXT, -- Icon name.
   can_link INTEGER -- Whether the skill can be linked.
 );
 CREATE TABLE glyph (
@@ -256,7 +256,7 @@ CREATE TABLE glyph (
   name TEXT, -- Glyph spell name.
   spell_id INTEGER, -- Glyph spell ID.
   type TEXT, -- Glyph type: MINOR or MAJOR.
-  icon TEXT -- Glyph icon texture path.
+  icon TEXT -- Icon name.
 );
 CREATE TABLE achievement (
   id INTEGER PRIMARY KEY, -- Achievement ID.
@@ -269,7 +269,7 @@ CREATE TABLE achievement (
   map_id INTEGER, -- Instance map ID; NULL for -1.
   flags TEXT, -- Decoded achievement flags separated by |.
   reward TEXT, -- Achievement reward text.
-  icon TEXT, -- Achievement icon texture path.
+  icon TEXT, -- Icon name.
   previous INTEGER, -- Previous achievement ID.
   min_criteria INTEGER -- Minimum criteria count.
 );
@@ -393,7 +393,7 @@ CREATE TABLE loot (
   entry INTEGER, -- Source loot entry ID.
   item INTEGER, -- Item ID; NULL for reference loot.
   reference INTEGER, -- Reference loot entry ID.
-  chance REAL, -- Drop chance percentage.
+  chance REAL, -- Drop chance percentage; 0 inside a group means an equal share of the group's remaining chance.
   quest_required INTEGER, -- Whether a quest is required.
   group_id INTEGER, -- Loot group ID.
   min_count INTEGER, -- Minimum item count.
@@ -502,7 +502,7 @@ CREATE TABLE talent_tab (
   name TEXT, -- Talent tab name.
   class TEXT, -- Decoded class names separated by |.
   order_index INTEGER, -- Talent tab display order.
-  icon TEXT -- Talent tab icon texture.
+  icon TEXT -- Icon name.
 );
 CREATE TABLE talent_spell (
   talent_id INTEGER, -- Talent ID.

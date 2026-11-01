@@ -69,12 +69,12 @@ Step-by-step instructions for agents are in [docs/install.md](docs/install.md).
 
 |Tool|Use|
 |---|---|
-|`search(text, kind?, limit?)`|Find records by name across all kinds. Exact and prefix matches rank first. Default 20 hits, maximum 100.|
+|`search(text, kind?, limit?)`|Find records by name across all kinds. Exact and prefix matches rank first, then player-learnable spells and spawned creatures. Spells show rank and class; creatures show title, level, and rank. Default 20 hits, maximum 100.|
 |`get(kind, id, fields?)`|Return one record. Pass field names to add fields, or `["all"]` for every field. `get(kind="meta")` returns build provenance.|
-|`related(kind, id, relation)`|List linked records, for example where an item drops, what a vendor sells, or the ranks of a spell.|
+|`related(kind, id, relation, limit?)`|List linked records, for example where an item drops (through shared loot tables), what a creature drops, sells, or trains, a whole quest chain, or the ranks of a spell. Default 50 rows, maximum 1000; a last line gives the total when rows are cut.|
 |`sql(query, limit?)`|Run one read-only SQLite statement. Default 200 rows, maximum 1000, 2-second time limit.|
 
-Output is compact `key=value` text (`sql` returns tab-separated rows). Zero, empty, and default fields are left out. Flags and enums are names. The server instructions list every kind and relation, so clients need no discovery call. To read the schema with column comments, run `SELECT sql FROM sqlite_schema WHERE type = 'table'`.
+Output is compact `key=value` text (`sql` returns tab-separated rows). Zero, empty, and default fields are left out. Flags and enums are names. An empty answer is a normal result; a bad value or a missing record is a tool error with a message that tells the model how to fix the call. Every tool is marked read-only. The server instructions list every kind, relation, and table, so clients need no discovery call. To read one table's schema with column comments, run `SELECT sql FROM sqlite_schema WHERE name = 'loot'`.
 
 Example: `related(kind="spell", id=133, relation="ranks")` returns:
 

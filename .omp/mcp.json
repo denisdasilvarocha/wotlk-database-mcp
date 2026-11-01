@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "wotlk-database": {
+      "type": "stdio",
+      "command": "/Users/denis/Documents/Git/wotlk-database-mcp/target/release/wotlk-database-mcp",
+      "args": [
+        "--db",
+        "/Users/denis/Documents/Git/wotlk-database-mcp/data/wotlk.sqlite"
+      ]
+    }
+  }
+}

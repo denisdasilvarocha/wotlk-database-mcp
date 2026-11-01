@@ -27,8 +27,10 @@ fn fixture_db() -> &'static Path {
     })
 }
 
+type Client = rmcp::service::RunningService<rmcp::RoleClient, ()>;
+
 #[expect(clippy::expect_used, reason = "Test client setup must fail loudly on invalid input")]
-async fn call(tool: &str, args: Value) -> Result<CallToolResult, ServiceError> {
+async fn connect() -> (Client, tokio::task::JoinHandle<()>) {
     let (server_io, client_io) = tokio::io::duplex(65536);
     let server = WotlkServer::open(fixture_db()).expect("open fixture database");
     let task = tokio::spawn(async move {
@@ -38,9 +40,15 @@ async fn call(tool: &str, args: Value) -> Result<CallToolResult, ServiceError> {
             .expect("serve")
             .waiting()
             .await
-            .expect("wait for server")
+            .expect("wait for server");
     });
     let client = ().serve(client_io).await.expect("connect client");
+    (client, task)
+}
+
+#[expect(clippy::expect_used, reason = "Test client setup must fail loudly on invalid input")]
+async fn call(tool: &str, args: Value) -> Result<CallToolResult, ServiceError> {
+    let (client, task) = connect().await;
     let result = client
         .call_tool(
             CallToolRequestParams::new(tool.to_owned())
@@ -228,7 +236,10 @@ async fn offsets_preserve_addresses_and_statuses() {
 #[tokio::test]
 async fn client_data_takes_precedence() {
     tool_error("get", json!({"kind":"spell", "id":90000}), "spell 90000 not found").await;
-    tool_error("search", json!({"text":"Server Only"}), "no matches").await;
+    assert_eq!(
+        success("search", json!({"text":"Server Only"})).await,
+        "no matches for \"Server Only\""
+    );
     let item = success("get", json!({"kind":"item", "id":50000, "fields":["all"]})).await;
     lines_include(&item, &["class=ARMOR", "display_id=1234"]);
     assert!(!item.lines().any(|line| line.starts_with("name=")), "{item}");
@@ -287,7 +298,12 @@ async fn all_relations_return_linked_fixture_records() {
             "dropped_by",
             &["creature 12056 Baron Geddon chance=4.5 count=1"],
         ),
-        ("item", 19020, "dropped_by", &["reference 10000 chance=10 count=1"]),
+        (
+            "item",
+            19020,
+            "dropped_by",
+            &["creature 12056 Baron Geddon chance=10 count=1 via=10000"],
+        ),
         (
             "item",
             4002,
@@ -551,10 +567,19 @@ async fn sql_is_read_only_bounded_and_reports_errors() {
         .await,
         "id\tname\n133\tFireball\n143\tFireball\n-- truncated: first 2 rows shown; raise limit (max 1000) or narrow the query"
     );
-    for query in ["DELETE FROM spell", "SELECT 1; SELECT 2", "SELEC 1"] {
-        invalid("sql", json!({"query":query})).await;
+    for (query, expected) in [
+        ("DELETE FROM spell", "only read-only statements are allowed"),
+        ("SELECT 1; SELECT 2", "only one statement is allowed"),
+        ("SELEC 1", "invalid SQL:"),
+    ] {
+        tool_error("sql", json!({"query":query}), expected).await;
     }
-    invalid("sql", json!({"query":"SELECT 1", "limit":1001})).await;
+    tool_error(
+        "sql",
+        json!({"query":"SELECT 1", "limit":1001}),
+        "limit must be between 1 and 1000",
+    )
+    .await;
     tool_error("sql", json!({"query":"SELECT abs(-9223372036854775808)"}), "SQL error:").await;
     tool_error(
         "sql",
@@ -573,26 +598,52 @@ async fn sql_is_read_only_bounded_and_reports_errors() {
 }
 
 #[tokio::test]
-async fn invalid_requests_and_missing_data_are_distinct() {
+async fn malformed_arguments_are_protocol_errors_and_bad_values_are_tool_errors() {
+    // Only arguments that cannot be deserialized keep a JSON-RPC error code.
     for (tool, args) in [
         ("get", json!({"kind":"pet","id":1})),
         ("related", json!({"kind":"item","id":19019,"relation":"eaten_by"})),
-        ("related", json!({"kind":"item","id":19019,"relation":"trains"})),
         ("related", json!({"kind":"offset","id":"X","relation":"ranks"})),
-        ("get", json!({"kind":"item"})),
-        ("get", json!({"kind":"item","id":"abc"})),
-        ("get", json!({"kind":"item","id":19019,"fields":["nope"]})),
+        ("search", json!({})),
     ] {
         invalid(tool, args).await;
     }
-    tool_error("get", json!({"kind":"item","id":999_999}), "item 999999 not found").await;
-    tool_error(
-        "related",
-        json!({"kind":"creature","id":5002,"relation":"loot"}),
-        "no loot for creature 5002",
-    )
-    .await;
-    tool_error("search", json!({"text":"zzzz"}), "no matches").await;
+    // Values that deserialize but are rejected inside the handler are tool errors.
+    for (tool, args, expected) in [
+        (
+            "related",
+            json!({"kind":"item","id":19019,"relation":"trains"}),
+            "valid: dropped_by, sold_by, reward_of, set, created_by, disenchant",
+        ),
+        ("get", json!({"kind":"item"}), "kind item needs an id"),
+        ("get", json!({"kind":"item","id":"abc"}), "kind item needs a numeric id"),
+        (
+            "get",
+            json!({"kind":"item","id":19019,"fields":["nope"]}),
+            "unknown field 'nope' for item; fields: ",
+        ),
+        ("get", json!({"kind":"item","id":999_999}), "item 999999 not found"),
+        (
+            "related",
+            json!({"kind":"item","id":999_999,"relation":"dropped_by"}),
+            "item 999999 not found",
+        ),
+        (
+            "search",
+            json!({"text":"   "}),
+            "search text needs at least one letter or digit",
+        ),
+    ] {
+        tool_error(tool, args, expected).await;
+    }
+    assert_eq!(
+        success("related", json!({"kind":"creature","id":5002,"relation":"loot"})).await,
+        "no loot for creature 5002"
+    );
+    assert_eq!(
+        success("search", json!({"text":"zzzz"})).await,
+        "no matches for \"zzzz\""
+    );
 }
 
 #[tokio::test]
@@ -688,9 +739,301 @@ async fn nested_vendor_references_expose_stock_in_both_directions() {
     lines_include(
         &sold_by,
         &[
-            "creature 5000 Brew Vendor",
-            "creature 5001 Fire Trainer",
-            "creature 5002 Marshal Dughan",
+            "creature 5000 Brew Vendor faction=Stormwind zone=Eastern Kingdoms",
+            "creature 5001 Fire Trainer faction=Stormwind zone=Elwynn Forest",
+            "creature 5002 Marshal Dughan faction=Stormwind zone=Elwynn Forest",
         ],
     );
+}
+
+/// Resolves one parameter schema of a tool and collects its `enum` values.
+#[expect(clippy::expect_used, reason = "every listed tool must document its parameters")]
+fn parameter_enum(tool: &rmcp::model::Tool, name: &str) -> Vec<String> {
+    let root = Value::Object(tool.input_schema.as_ref().clone());
+    let schema = root.pointer(&format!("/properties/{name}")).expect("parameter schema");
+    let mut values = Vec::new();
+    collect_enum_values(schema, &root, &mut values);
+    values.sort();
+    values
+}
+
+/// Collects the `enum` values of a schema, following `$ref` and `anyOf` branches.
+fn collect_enum_values(schema: &Value, root: &Value, values: &mut Vec<String>) {
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        if let Some(target) = root.pointer(reference.trim_start_matches('#')) {
+            collect_enum_values(target, root, values);
+        }
+        return;
+    }
+    match schema {
+        Value::Object(object) => {
+            if let Some(entries) = object.get("enum").and_then(Value::as_array) {
+                values.extend(entries.iter().filter_map(Value::as_str).map(str::to_owned));
+            }
+            for (key, nested) in object {
+                if key != "enum" {
+                    collect_enum_values(nested, root, values);
+                }
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|item| collect_enum_values(item, root, values)),
+        _ => {}
+    }
+}
+
+#[tokio::test]
+async fn tools_list_declares_read_only_annotations_and_usable_kinds() {
+    let (client, task) = connect().await;
+    let tools = client.list_tools(None).await.expect("list tools").tools;
+    client.cancel().await.expect("cancel client");
+    task.await.expect("join server");
+
+    let find = |name: &str| tools.iter().find(|tool| tool.name == name).expect("tool is listed");
+    for name in ["search", "get", "related", "sql"] {
+        let tool = find(name);
+        let annotations = tool.annotations.as_ref().expect("tool annotations");
+        assert_eq!(annotations.read_only_hint, Some(true), "{name}");
+        assert_eq!(annotations.destructive_hint, Some(false), "{name}");
+        assert_eq!(annotations.idempotent_hint, Some(true), "{name}");
+        assert_eq!(annotations.open_world_hint, Some(false), "{name}");
+        assert!(tool.title.is_some(), "{name} has no title");
+        assert!(annotations.title.is_none() || annotations.title.as_deref() == tool.title.as_deref());
+        let description = tool.description.as_deref().expect("tool description");
+        assert!(
+            description.starts_with("World of Warcraft 3.3.5a"),
+            "{name}: {description}"
+        );
+    }
+
+    assert_eq!(
+        parameter_enum(find("search"), "kind"),
+        [
+            "achievement",
+            "area",
+            "combatlog_event",
+            "creature",
+            "cvar",
+            "faction",
+            "gameobject",
+            "glyph",
+            "item",
+            "itemset",
+            "lua_event",
+            "lua_function",
+            "lua_type",
+            "map",
+            "offset",
+            "quest",
+            "secure_template",
+            "skill",
+            "spell",
+            "talent",
+            "widget",
+        ]
+    );
+
+    assert_eq!(
+        parameter_enum(find("related"), "kind"),
+        [
+            "achievement",
+            "area",
+            "creature",
+            "faction",
+            "gameobject",
+            "item",
+            "quest",
+            "spell",
+        ]
+    );
+    let related_schema = Value::Object(find("related").input_schema.as_ref().clone());
+    let relation_doc = related_schema
+        .pointer("/properties/relation/description")
+        .and_then(Value::as_str)
+        .expect("relation doc");
+    assert!(relation_doc.contains("item: `dropped_by`, `sold_by`"), "{relation_doc}");
+    assert!(
+        related_schema
+            .pointer("/properties/limit/description")
+            .and_then(Value::as_str)
+            .is_some_and(|doc| doc.contains("1000")),
+        "related limit doc mentions its maximum"
+    );
+}
+
+#[tokio::test]
+async fn related_limit_cuts_with_total_footer() {
+    let cut = success("related", json!({"kind":"spell","id":143,"relation":"ranks","limit":1})).await;
+    let lines: Vec<_> = cut.lines().collect();
+    assert_eq!(lines.len(), 2, "{cut}");
+    assert!(lines[0].starts_with("spell "), "{cut}");
+    assert_eq!(lines[1], "-- 1 of 2 shown; raise limit (max 1000)");
+    let all = success("related", json!({"kind":"spell","id":143,"relation":"ranks"})).await;
+    assert_eq!(all.lines().count(), 2, "{all}");
+    assert!(!all.contains("-- "), "{all}");
+    for limit in [0, 1001] {
+        tool_error(
+            "related",
+            json!({"kind":"spell","id":143,"relation":"ranks","limit":limit}),
+            "limit must be between 1 and 1000",
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn sql_guard_rejects_pragma_assignments_and_transactions() {
+    for query in [
+        "PRAGMA query_only=0",
+        "PRAGMA cache_size=1",
+        "BEGIN",
+        "COMMIT",
+        "SAVEPOINT s",
+        "ATTACH DATABASE 'other.sqlite' AS other",
+    ] {
+        tool_error("sql", json!({"query":query}), "only read-only statements are allowed").await;
+    }
+    let columns = success("sql", json!({"query":"PRAGMA table_info(item)"})).await;
+    assert!(
+        columns.lines().next().is_some_and(|line| line.contains("name")),
+        "{columns}"
+    );
+    assert!(columns.lines().count() > 1, "{columns}");
+    assert_eq!(
+        success("sql", json!({"query":"PRAGMA query_only"})).await,
+        "query_only\n1"
+    );
+}
+
+#[tokio::test]
+async fn search_ranks_learnable_spells_above_npc_copies() {
+    let results = success("search", json!({"text":"fireball"})).await;
+    let first = results.lines().next().expect("at least one hit");
+    assert!(first.starts_with("spell 133 Fireball"), "{results}");
+    assert!(results.lines().any(|line| line == "spell 9053 Fireball"), "{results}");
+    let learnable = results.find("spell 133 Fireball").expect("player spell");
+    let copy = results.find("spell 9053 Fireball").expect("npc copy");
+    assert!(learnable < copy, "{results}");
+}
+
+#[tokio::test]
+async fn single_letter_search_matches_tokens() {
+    let results = success("search", json!({"text":"1"})).await;
+    assert!(
+        results.lines().any(|line| line.starts_with("spell 133 Fireball")),
+        "{results}"
+    );
+}
+
+#[tokio::test]
+async fn dropped_by_follows_reference_loot_to_its_sources() {
+    // One reference level: item 19020 lives in reference 10000.
+    assert_eq!(
+        success("related", json!({"kind":"item","id":19020,"relation":"dropped_by"})).await,
+        "creature 12056 Baron Geddon chance=10 count=1 via=10000"
+    );
+    // Two reference levels: item 19022 lives in reference 10001, inside reference 10002.
+    assert_eq!(
+        success("related", json!({"kind":"item","id":19022,"relation":"dropped_by"})).await,
+        "creature 12056 Baron Geddon chance=25 count=1 via=10001"
+    );
+}
+
+#[tokio::test]
+async fn loot_expands_reference_tables_in_place() {
+    let loot = success("related", json!({"kind":"creature","id":12056,"relation":"loot"})).await;
+    assert_eq!(
+        loot,
+        [
+            "reference 10000 chance=100 count=1",
+            "item 19020 Tyrael's Hilt chance=10 count=1 via=10000",
+            "reference 10002 chance=100 count=1",
+            "reference 10001 chance=50 count=1 via=10002",
+            "item 19022 O'Reilly's Ring chance=25 count=1 via=10001",
+            "item 19019 Thunderfury, Blessed Blade of the Windseeker chance=4.5 count=1",
+        ]
+        .join("\n")
+    );
+}
+
+#[tokio::test]
+async fn quest_chain_returns_the_whole_chain_with_steps() {
+    let chain = success("related", json!({"kind":"quest","id":1002,"relation":"chain"})).await;
+    assert_eq!(
+        chain,
+        [
+            "quest 1001 The Fiery Path link=previous step=-1",
+            "quest 1002 The Fiery Path Continues link=self step=0",
+            "quest 1003 Another Fiery Path link=exclusive step=0",
+            "quest 1005 Into the Fire link=follow_up step=1",
+        ]
+        .join("\n")
+    );
+}
+
+#[tokio::test]
+async fn relation_sources_report_faction_and_zone() {
+    assert_eq!(
+        success("related", json!({"kind":"spell","id":4001,"relation":"taught_by"})).await,
+        [
+            "creature 5001 Fire Trainer cost=500 req_level=10 faction=Stormwind zone=Elwynn Forest",
+            "item 4000 Recipe: Fiery Brew",
+            "quest 1001 The Fiery Path",
+            "spell 4003 Teach Fiery Brew",
+        ]
+        .join("\n")
+    );
+    assert_eq!(
+        success("related", json!({"kind":"quest","id":1001,"relation":"givers"})).await,
+        [
+            "creature 5002 Marshal Dughan faction=Stormwind zone=Elwynn Forest",
+            "item 4007 Mysterious Letter",
+        ]
+        .join("\n")
+    );
+    assert_eq!(
+        success("related", json!({"kind":"quest","id":1001,"relation":"enders"})).await,
+        "creature 5002 Marshal Dughan faction=Stormwind zone=Elwynn Forest"
+    );
+}
+
+#[tokio::test]
+async fn instructions_name_the_game_and_list_every_table() {
+    let (client, task) = connect().await;
+    let info = client.peer_info().expect("server info");
+    let instructions = info.instructions.clone().expect("server instructions");
+    client.cancel().await.expect("cancel client");
+    task.await.expect("join server");
+
+    assert!(
+        instructions.starts_with("World of Warcraft: Wrath of the Lich King 3.3.5a"),
+        "{instructions}"
+    );
+    for trigger in ["addon", "TrinityCore/AzerothCore", "reverse engineering"] {
+        assert!(instructions.contains(trigger), "missing {trigger}");
+    }
+    assert!(
+        instructions.contains("chance=0 inside a group means an equal share"),
+        "{instructions}"
+    );
+    assert!(instructions.contains("via=N"), "{instructions}");
+    assert!(instructions.contains("step=n"), "{instructions}");
+    assert!(!instructions.contains("WHERE reference = N"), "{instructions}");
+
+    let mut listed: Vec<_> = instructions
+        .lines()
+        .find_map(|line| line.strip_prefix("Tables: "))
+        .expect("table list")
+        .trim_end_matches('.')
+        .split(", ")
+        .map(str::to_owned)
+        .collect();
+    let tables = success(
+        "sql",
+        json!({"query":"SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'search%'"}),
+    )
+    .await;
+    let mut actual: Vec<_> = tables.lines().skip(1).map(str::to_owned).collect();
+    listed.sort();
+    actual.sort();
+    assert_eq!(listed, actual);
 }

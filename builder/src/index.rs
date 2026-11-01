@@ -4,121 +4,187 @@ use rusqlite::{Connection, params};
 
 use crate::{BuildError, schema};
 
-// Every query returns a textual key, a nonempty name, and optional subtext.
-const SOURCES: &[(&str, &str)] = &[
-    (
-        "item",
-        "SELECT CAST(id AS TEXT), name, NULLIF(trim(coalesce(quality || ' ', '') || coalesce(subclass || ' ', '') || coalesce('ilvl ' || item_level, '')), '') FROM item WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "creature",
-        "SELECT CAST(id AS TEXT), name, subname FROM creature WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "spell",
-        "SELECT CAST(id AS TEXT), name, rank FROM spell WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "itemset",
-        "SELECT CAST(id AS TEXT), name, NULL FROM itemset WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "quest",
-        "SELECT CAST(id AS TEXT), name, 'level ' || level FROM quest WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "gameobject",
-        "SELECT CAST(id AS TEXT), name, type FROM gameobject WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "map",
-        "SELECT CAST(id AS TEXT), name, type FROM map WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "area",
-        "SELECT CAST(id AS TEXT), name, map FROM area WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "faction",
-        "SELECT CAST(id AS TEXT), name, NULL FROM faction WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "talent",
-        "SELECT CAST(id AS TEXT), name, tab FROM talent WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "skill",
-        "SELECT CAST(id AS TEXT), name, category FROM skill WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "glyph",
-        "SELECT CAST(id AS TEXT), name, type FROM glyph WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "achievement",
-        "SELECT CAST(id AS TEXT), name, category FROM achievement WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "offset",
-        "SELECT name, name, NULLIF(trim(coalesce(va || ' ', '') || coalesce(status, '')), '') FROM offsets WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "lua_function",
-        "SELECT name, name, signature FROM lua_function WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "lua_event",
-        "SELECT name, name, category FROM lua_event WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "widget",
-        "SELECT name, name, category FROM widget WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "cvar",
-        "SELECT name, name, 'default=' || default_value FROM cvar WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "lua_type",
-        "SELECT name, name, NULL FROM lua_type WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "combatlog_event",
-        "SELECT name, name, type FROM combatlog_event WHERE name IS NOT NULL AND name <> ''",
-    ),
-    (
-        "secure_template",
-        "SELECT name, name, NULL FROM secure_template WHERE name IS NOT NULL AND name <> ''",
-    ),
+/// How a source supplies the extra full-text terms of a record.
+#[derive(Clone, Copy)]
+enum Terms {
+    /// Append the subtext, which repeats useful detail such as a spell rank.
+    Subtext,
+    /// Append the separate terms column instead of the subtext.
+    Separate,
+}
+
+/// One searchable kind.
+struct Source {
+    /// Kind name stored in `search.kind`.
+    kind: &'static str,
+    /// Query returning a textual key, a nonempty name, extra terms, optional
+    /// subtext, and an integer priority (0 primary, 1 secondary).
+    sql: &'static str,
+    /// Where the extra full-text terms come from.
+    terms: Terms,
+}
+
+// Every query returns a textual key, a nonempty name, extra terms, optional
+// subtext, and a priority. Player-learnable spells and spawned creatures are
+// primary (0); unlearnable spells and unspawned creatures are secondary (1);
+// every other record is primary.
+const SOURCES: &[Source] = &[
+    Source {
+        kind: "item",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, NULLIF(trim(coalesce(quality || ' ', '') || coalesce(subclass || ' ', '') || coalesce('ilvl ' || item_level, '')), ''), 0 FROM item WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "creature",
+        terms: Terms::Separate,
+        sql: "SELECT CAST(id AS TEXT), name, subname, \
+              NULLIF(trim(coalesce(subname || CASE WHEN level_text IS NOT NULL OR rank IS NOT NULL THEN ', ' ELSE '' END, '') \
+              || coalesce(level_text, '') \
+              || CASE WHEN level_text IS NOT NULL AND rank IS NOT NULL THEN ' ' ELSE '' END \
+              || coalesce(rank, '')), ''), priority \
+              FROM (SELECT id, name, NULLIF(trim(subname), '') AS subname, rank, \
+                    CASE WHEN min_level IS NULL AND max_level IS NULL THEN NULL \
+                         WHEN min_level IS NULL THEN 'level ' || max_level \
+                         WHEN max_level IS NULL OR max_level <= min_level THEN 'level ' || min_level \
+                         ELSE 'level ' || min_level || '-' || max_level END AS level_text, \
+                    CASE WHEN EXISTS (SELECT 1 FROM creature_spawn WHERE creature_id = creature.id) THEN 0 ELSE 1 END AS priority \
+                    FROM creature WHERE name IS NOT NULL AND name <> '')",
+    },
+    Source {
+        kind: "spell",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, NULLIF(trim(coalesce(rank || ' ', '') || coalesce(family, '')), ''), \
+              CASE WHEN EXISTS (SELECT 1 FROM spell_rank WHERE spell_id = spell.id) \
+                     OR EXISTS (SELECT 1 FROM skill_ability WHERE spell_id = spell.id) \
+                     OR EXISTS (SELECT 1 FROM trainer_spell WHERE spell_id = spell.id) THEN 0 ELSE 1 END \
+              FROM spell WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "itemset",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, NULL, 0 FROM itemset WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "quest",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, 'level ' || level, 0 FROM quest WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "gameobject",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, type, 0 FROM gameobject WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "map",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, type, 0 FROM map WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "area",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, map, 0 FROM area WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "faction",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, NULL, 0 FROM faction WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "talent",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, tab, 0 FROM talent WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "skill",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, category, 0 FROM skill WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "glyph",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, type, 0 FROM glyph WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "achievement",
+        terms: Terms::Subtext,
+        sql: "SELECT CAST(id AS TEXT), name, NULL, category, 0 FROM achievement WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "offset",
+        terms: Terms::Subtext,
+        sql: "SELECT name, name, NULL, NULLIF(trim(coalesce(va || ' ', '') || coalesce(status, '')), ''), 0 FROM offsets WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "lua_function",
+        terms: Terms::Subtext,
+        sql: "SELECT name, name, NULL, signature, 0 FROM lua_function WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "lua_event",
+        terms: Terms::Subtext,
+        sql: "SELECT name, name, NULL, category, 0 FROM lua_event WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "widget",
+        terms: Terms::Subtext,
+        sql: "SELECT name, name, NULL, category, 0 FROM widget WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "cvar",
+        terms: Terms::Subtext,
+        sql: "SELECT name, name, NULL, 'default=' || default_value, 0 FROM cvar WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "lua_type",
+        terms: Terms::Subtext,
+        sql: "SELECT name, name, NULL, NULL, 0 FROM lua_type WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "combatlog_event",
+        terms: Terms::Subtext,
+        sql: "SELECT name, name, NULL, type, 0 FROM combatlog_event WHERE name IS NOT NULL AND name <> ''",
+    },
+    Source {
+        kind: "secure_template",
+        terms: Terms::Subtext,
+        sql: "SELECT name, name, NULL, NULL, 0 FROM secure_template WHERE name IS NOT NULL AND name <> ''",
+    },
 ];
 /// Creates secondary indexes, the unified search index, and provenance records.
 pub(crate) fn build(conn: &Connection, meta: &[(&str, &str)]) -> Result<(), BuildError> {
     conn.execute_batch(schema::SECONDARY_INDEXES)?;
     conn.execute_batch(
         "CREATE VIRTUAL TABLE search USING fts5(\
-         name, terms, kind UNINDEXED, id UNINDEXED, subtext UNINDEXED, \
+         name, terms, kind UNINDEXED, id UNINDEXED, subtext UNINDEXED, priority UNINDEXED, \
          tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3')",
     )?;
 
-    let mut insert = conn.prepare("INSERT INTO search(name, terms, kind, id, subtext) VALUES (?1, ?2, ?3, ?4, ?5)")?;
-    for &(kind, sql) in SOURCES {
-        let mut select = conn.prepare(sql)?;
+    let mut insert =
+        conn.prepare("INSERT INTO search(name, terms, kind, id, subtext, priority) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")?;
+    for source in SOURCES {
+        let mut select = conn.prepare(source.sql)?;
         let mut rows = select.query([])?;
         while let Some(row) = rows.next()? {
             let id: String = row.get(0)?;
             let name: String = row.get(1)?;
-            let subtext: Option<String> = row.get(2)?;
+            let extra: Option<String> = row.get(2)?;
+            let subtext: Option<String> = row.get(3)?;
+            let priority: i64 = row.get(4)?;
             let mut terms = split_identifier(&name);
             if terms == name {
                 terms.clear();
             }
-            if let Some(subtext) = subtext.as_deref().filter(|s| !s.is_empty()) {
+            let extra = match source.terms {
+                Terms::Subtext => subtext.as_deref(),
+                Terms::Separate => extra.as_deref(),
+            };
+            if let Some(extra) = extra.filter(|text| !text.is_empty()) {
                 if !terms.is_empty() {
                     terms.push(' ');
                 }
-                terms.push_str(subtext);
+                terms.push_str(extra);
             }
-            insert.execute(params![name, terms, kind, id, subtext])?;
+            insert.execute(params![name, terms, source.kind, id, subtext, priority])?;
         }
     }
 

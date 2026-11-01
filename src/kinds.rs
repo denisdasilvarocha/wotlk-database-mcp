@@ -37,6 +37,21 @@ named_enum!(Relation {
     Criteria => "criteria"
 });
 
+// An enum that limits a tool parameter to a subset of `Kind`; variants map onto `Kind`.
+macro_rules! kind_enum {
+    ($name:ident { $($variant:ident),+ $(,)? }) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+        #[serde(rename_all = "snake_case")]
+        pub(crate) enum $name { $($variant),+ }
+
+        impl $name {
+            pub(crate) const fn kind(self) -> Kind {
+                match self { $(Self::$variant => Kind::$variant),+ }
+            }
+        }
+    };
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub(crate) enum RecordId {
@@ -44,15 +59,136 @@ pub(crate) enum RecordId {
     Text(String),
 }
 
+// Every searchable kind; `meta` is excluded because it has no records to find.
+kind_enum!(SearchKind {
+    Item,
+    Creature,
+    Spell,
+    Itemset,
+    Quest,
+    Gameobject,
+    Map,
+    Area,
+    Faction,
+    Talent,
+    Skill,
+    Glyph,
+    Achievement,
+    Offset,
+    LuaFunction,
+    LuaEvent,
+    Widget,
+    Cvar,
+    LuaType,
+    CombatlogEvent,
+    SecureTemplate
+});
+
+// Only the kinds with relations, so `related` cannot be called with an unusable kind.
+kind_enum!(RelatedKind {
+    Item,
+    Creature,
+    Quest,
+    Spell,
+    Gameobject,
+    Area,
+    Faction,
+    Achievement
+});
+
 macro_rules! loot_cols {
     () => {
         "l.chance, CASE WHEN l.min_count = l.max_count THEN l.min_count ELSE l.min_count || '-' || l.max_count END AS count, l.quest_required AS quest, l.group_id AS \"group\""
     };
 }
 
-macro_rules! loot_rows {
+// Raw loot columns for a CTE body; the loot table is always aliased `l`.
+macro_rules! loot_fields {
     () => {
-        concat!("SELECT CASE WHEN l.reference IS NULL THEN 'item' ELSE 'reference' END AS kind, coalesce(l.item, l.reference) AS id, i.name, ", loot_cols!())
+        "l.chance, l.min_count, l.max_count, l.quest_required, l.group_id"
+    };
+}
+
+// Kind, id and name of a loot row: an item, or the reference table that holds it.
+macro_rules! loot_entry {
+    () => {
+        "CASE WHEN l.reference IS NULL THEN 'item' ELSE 'reference' END, coalesce(l.item, l.reference), i.name"
+    };
+}
+
+// A loot table plus every item of the reference tables it points at, nested up to five
+// levels. Each expanded row carries `via` = the reference table that contains it, and
+// `chance` = the item's chance inside that table.
+macro_rules! loot_tree {
+    ($filter:literal) => {
+        concat!(
+            "WITH RECURSIVE base(path, kind, id, name, chance, min_count, max_count, quest_required, group_id) AS (",
+            "SELECT printf('%06d', row_number() OVER (ORDER BY l.group_id, l.chance DESC, coalesce(l.item, l.reference))), ",
+            loot_entry!(),
+            ", ",
+            loot_fields!(),
+            " FROM loot l LEFT JOIN item i ON i.id = l.item WHERE ",
+            $filter,
+            "), tree(path, depth, visited, kind, id, name, chance, min_count, max_count, quest_required, group_id, via) AS (",
+            "SELECT path, 0, ',', kind, id, name, chance, min_count, max_count, quest_required, group_id, NULL FROM base",
+            " UNION ALL SELECT t.path || printf('|%04d%09d%010d', l.group_id, 1000000 - CAST(round(l.chance * 100) AS INTEGER), coalesce(l.item, l.reference)), t.depth + 1, t.visited || t.id || ',', ",
+            loot_entry!(),
+            ", ",
+            loot_fields!(),
+            ", t.id FROM tree t JOIN loot l ON l.source = 'reference' AND l.entry = t.id",
+            " LEFT JOIN item i ON i.id = l.item",
+            " WHERE t.kind = 'reference' AND t.depth < 5 AND instr(t.visited, ',' || t.id || ',') = 0) ",
+            "SELECT kind, id, name, ",
+            loot_cols!(),
+            ", via FROM tree l ORDER BY l.path"
+        )
+    };
+}
+
+// Faction name and the zone of the lowest-GUID spawn of creature `c`. Most TDB 335 spawns
+// have no zone id, so the zone falls back to the map name, as in the spawns relation.
+macro_rules! creature_zone {
+    () => {
+        ", c.faction, (SELECT coalesce(a.name, m.name) FROM creature_spawn s LEFT JOIN area a ON a.id = s.zone LEFT JOIN map m ON m.id = s.map WHERE s.creature_id = c.id ORDER BY s.guid LIMIT 1) AS zone"
+    };
+}
+
+// The whole quest chain around one quest: ancestors, the quest itself, descendants.
+macro_rules! quest_chain {
+    () => {
+        concat!(
+            "WITH RECURSIVE chain(id, step, link, must_be_active, up, down) AS (",
+            "SELECT ?1, 0, 'self', NULL, 0, 0",
+            " UNION SELECT p.id, c.step - 1, 'previous', CASE WHEN q.prev_quest < 0 THEN 1 END, c.up + 1, 0",
+            " FROM chain c JOIN quest q ON q.id = c.id JOIN quest p ON p.id = abs(q.prev_quest)",
+            " WHERE c.down = 0 AND c.up < 50 AND q.prev_quest <> 0",
+            " UNION SELECT n.id, c.step + 1, 'next', NULL, 0, c.down + 1",
+            " FROM chain c JOIN quest q ON q.id = c.id JOIN quest n ON n.id = q.next_quest",
+            " WHERE c.up = 0 AND c.down < 50 AND q.next_quest <> 0",
+            " UNION SELECT n.id, c.step + 1, 'reward_next', NULL, 0, c.down + 1",
+            " FROM chain c JOIN quest q ON q.id = c.id JOIN quest n ON n.id = q.reward_next_quest",
+            " WHERE c.up = 0 AND c.down < 50 AND q.reward_next_quest <> 0",
+            " UNION SELECT f.id, c.step + 1, 'follow_up', CASE WHEN f.prev_quest < 0 THEN 1 END, 0, c.down + 1",
+            " FROM chain c JOIN quest f ON f.prev_quest = c.id OR f.prev_quest = -c.id",
+            " WHERE c.up = 0 AND c.down < 50), ",
+            "ranked(id, step, link, must_be_active, rank) AS (",
+            "SELECT id, step, link, must_be_active, row_number() OVER (PARTITION BY id",
+            " ORDER BY abs(step), CASE link WHEN 'previous' THEN 0 WHEN 'next' THEN 1 WHEN 'reward_next' THEN 2 ELSE 3 END, step) AS rank",
+            " FROM chain) ",
+            // `step` is printed as text: the formatter drops numeric zeros, but step 0 marks
+            // the queried quest itself.
+            "SELECT kind, id, name, link, must_be_active, printf('%d', step) AS step FROM (",
+            "SELECT 'quest' AS kind, r.id, q.name, r.link, r.must_be_active, r.step",
+            " FROM ranked r JOIN quest q ON q.id = r.id WHERE r.rank = 1",
+            " UNION ALL SELECT 'quest', e.id, e.name, CASE WHEN q.exclusive_group < 0 THEN 'group_all' ELSE 'exclusive' END, NULL, 0",
+            " FROM quest q JOIN quest e ON e.exclusive_group = q.exclusive_group AND e.id <> q.id",
+            " WHERE q.id = ?1 AND q.exclusive_group IS NOT NULL",
+            " UNION ALL SELECT 'quest', b.id, b.name, 'breadcrumb_for', NULL, 1",
+            " FROM quest q JOIN quest b ON b.id = q.breadcrumb_for WHERE q.id = ?1",
+            " UNION ALL SELECT 'quest', b.id, b.name, 'breadcrumb', NULL, -1 FROM quest b WHERE b.breadcrumb_for = ?1)",
+            " ORDER BY CAST(step AS INTEGER), CASE link WHEN 'self' THEN 0 WHEN 'breadcrumb' THEN 1",
+            " WHEN 'previous' THEN 2 WHEN 'next' THEN 3 WHEN 'reward_next' THEN 4 ELSE 5 END, id"
+        )
     };
 }
 
@@ -188,21 +324,48 @@ impl Kind {
             Self::Item => &[
                 (
                     R::DroppedBy,
+                    // Direct drops, plus every source that uses a reference table holding
+                    // the item, nested up to five levels; `via` names the innermost
+                    // reference table and `chance` is the item's chance inside it.
                     concat!(
-                        "SELECT * FROM (SELECT 'creature' AS kind, c.id, c.name, ",
+                        "WITH RECURSIVE refs(via, ref, depth, chance, min_count, max_count, quest_required, group_id) AS (",
+                        "SELECT l.entry, l.entry, 0, ",
+                        loot_fields!(),
+                        " FROM loot l WHERE l.source = 'reference' AND l.item = ?1",
+                        " UNION SELECT r.via, l.entry, r.depth + 1, r.chance, r.min_count, r.max_count, r.quest_required, r.group_id",
+                        " FROM refs r CROSS JOIN loot l INDEXED BY loot_reference",
+                        " WHERE l.reference = r.ref AND l.source = 'reference' AND r.depth < 5), ",
+                        "rows(kind, id, name, chance, min_count, max_count, quest_required, group_id, via) AS (",
+                        "SELECT 'creature', c.id, c.name, ",
+                        loot_fields!(),
+                        ", NULL FROM loot l JOIN creature c ON c.loot_id = l.entry WHERE l.source = 'creature' AND l.item = ?1",
+                        " UNION SELECT 'gameobject', g.id, g.name, ",
+                        loot_fields!(),
+                        ", NULL FROM loot l JOIN gameobject g ON g.loot_id = l.entry WHERE l.source = 'gameobject' AND l.item = ?1",
+                        " UNION SELECT 'item', x.id, x.name, ",
+                        loot_fields!(),
+                        ", NULL FROM loot l JOIN item x ON x.id = l.entry WHERE l.source = 'item' AND l.item = ?1",
+                        " UNION SELECT 'creature', c.id, c.name, r.chance, r.min_count, r.max_count, r.quest_required, r.group_id, r.via",
+                        " FROM refs r CROSS JOIN loot l INDEXED BY loot_reference CROSS JOIN creature c",
+                        " WHERE l.reference = r.ref AND l.source = 'creature' AND c.loot_id = l.entry",
+                        " UNION SELECT 'gameobject', g.id, g.name, r.chance, r.min_count, r.max_count, r.quest_required, r.group_id, r.via",
+                        " FROM refs r CROSS JOIN loot l INDEXED BY loot_reference CROSS JOIN gameobject g",
+                        " WHERE l.reference = r.ref AND l.source = 'gameobject' AND g.loot_id = l.entry",
+                        " UNION SELECT 'item', x.id, x.name, r.chance, r.min_count, r.max_count, r.quest_required, r.group_id, r.via",
+                        " FROM refs r CROSS JOIN loot l INDEXED BY loot_reference CROSS JOIN item x",
+                        " WHERE l.reference = r.ref AND l.source = 'item' AND x.id = l.entry)",
+                        " SELECT kind, id, name, ",
                         loot_cols!(),
-                        " FROM loot l JOIN creature c ON c.loot_id = l.entry WHERE l.source = 'creature' AND l.item = ?1 UNION ALL SELECT 'gameobject', g.id, g.name, ",
-                        loot_cols!(),
-                        " FROM loot l JOIN gameobject g ON g.loot_id = l.entry WHERE l.source = 'gameobject' AND l.item = ?1 UNION ALL SELECT 'item', x.id, x.name, ",
-                        loot_cols!(),
-                        " FROM loot l JOIN item x ON x.id = l.entry WHERE l.source = 'item' AND l.item = ?1 UNION ALL SELECT 'reference', l.entry, NULL, ",
-                        loot_cols!(),
-                        " FROM loot l WHERE l.source = 'reference' AND l.item = ?1) ORDER BY chance DESC, kind, id"
+                        ", via FROM rows l ORDER BY l.chance DESC, l.kind, l.id"
                     ),
                 ),
                 (
                     R::SoldBy,
-                    "SELECT 'creature', c.id, c.name, i.buy_price AS price, v.cost, v.max_count, v.restock_time FROM vendor v JOIN creature c ON c.id = v.creature_id LEFT JOIN item i ON i.id = v.item_id WHERE v.item_id = ?1 ORDER BY c.id",
+                    concat!(
+                        "SELECT 'creature', c.id, c.name, i.buy_price AS price, v.cost, v.max_count, v.restock_time",
+                        creature_zone!(),
+                        " FROM vendor v JOIN creature c ON c.id = v.creature_id LEFT JOIN item i ON i.id = v.item_id WHERE v.item_id = ?1 ORDER BY c.id"
+                    ),
                 ),
                 (
                     R::RewardOf,
@@ -218,19 +381,13 @@ impl Kind {
                 ),
                 (
                     R::Disenchant,
-                    concat!(
-                        loot_rows!(),
-                        " FROM item d JOIN loot l ON l.source = 'disenchant' AND l.entry = d.disenchant_id LEFT JOIN item i ON i.id = l.item WHERE d.id = ?1 ORDER BY l.chance DESC, id"
-                    ),
+                    loot_tree!("l.source = 'disenchant' AND l.entry = (SELECT disenchant_id FROM item WHERE id = ?1)"),
                 ),
             ],
             Self::Creature => &[
                 (
                     R::Loot,
-                    concat!(
-                        loot_rows!(),
-                        " FROM creature c JOIN loot l ON l.source = 'creature' AND l.entry = c.loot_id LEFT JOIN item i ON i.id = l.item WHERE c.id = ?1 ORDER BY l.group_id, l.chance DESC, id"
-                    ),
+                    loot_tree!("l.source = 'creature' AND l.entry = (SELECT loot_id FROM creature WHERE id = ?1)"),
                 ),
                 (
                     R::Sells,
@@ -260,16 +417,22 @@ impl Kind {
             Self::Quest => &[
                 (
                     R::Givers,
-                    "SELECT * FROM (SELECT r.source_kind AS kind, r.source_id AS id, coalesce(c.name, g.name) AS name FROM quest_relation r LEFT JOIN creature c ON r.source_kind = 'creature' AND c.id = r.source_id LEFT JOIN gameobject g ON r.source_kind = 'gameobject' AND g.id = r.source_id WHERE r.quest_id = ?1 AND r.role = 'start' UNION ALL SELECT 'item', i.id, i.name FROM item i WHERE i.start_quest = ?1) ORDER BY kind, id",
+                    concat!(
+                        "SELECT * FROM (SELECT r.source_kind AS kind, r.source_id AS id, coalesce(c.name, g.name) AS name",
+                        creature_zone!(),
+                        " FROM quest_relation r LEFT JOIN creature c ON r.source_kind = 'creature' AND c.id = r.source_id LEFT JOIN gameobject g ON r.source_kind = 'gameobject' AND g.id = r.source_id WHERE r.quest_id = ?1 AND r.role = 'start'",
+                        " UNION ALL SELECT 'item', i.id, i.name, NULL, NULL FROM item i WHERE i.start_quest = ?1) ORDER BY kind, id"
+                    ),
                 ),
                 (
                     R::Enders,
-                    "SELECT r.source_kind AS kind, r.source_id AS id, coalesce(c.name, g.name) AS name FROM quest_relation r LEFT JOIN creature c ON r.source_kind = 'creature' AND c.id = r.source_id LEFT JOIN gameobject g ON r.source_kind = 'gameobject' AND g.id = r.source_id WHERE r.quest_id = ?1 AND r.role = 'end' ORDER BY kind, id",
+                    concat!(
+                        "SELECT r.source_kind AS kind, r.source_id AS id, coalesce(c.name, g.name) AS name",
+                        creature_zone!(),
+                        " FROM quest_relation r LEFT JOIN creature c ON r.source_kind = 'creature' AND c.id = r.source_id LEFT JOIN gameobject g ON r.source_kind = 'gameobject' AND g.id = r.source_id WHERE r.quest_id = ?1 AND r.role = 'end' ORDER BY kind, id"
+                    ),
                 ),
-                (
-                    R::Chain,
-                    "SELECT * FROM (SELECT 'quest' AS kind, p.id, p.name, 'previous' AS link, CASE WHEN q.prev_quest < 0 THEN 1 END AS must_be_active FROM quest q JOIN quest p ON p.id = abs(q.prev_quest) WHERE q.id = ?1 UNION ALL SELECT 'quest', n.id, n.name, 'next', NULL FROM quest q JOIN quest n ON n.id = q.next_quest WHERE q.id = ?1 UNION ALL SELECT 'quest', n.id, n.name, 'reward_next', NULL FROM quest q JOIN quest n ON n.id = q.reward_next_quest WHERE q.id = ?1 UNION ALL SELECT 'quest', f.id, f.name, 'follow_up', CASE WHEN f.prev_quest < 0 THEN 1 END FROM quest f WHERE abs(f.prev_quest) = ?1 UNION ALL SELECT 'quest', e.id, e.name, CASE WHEN q.exclusive_group < 0 THEN 'group_all' ELSE 'exclusive' END, NULL FROM quest q JOIN quest e ON e.exclusive_group = q.exclusive_group AND e.id <> q.id WHERE q.id = ?1 AND q.exclusive_group IS NOT NULL UNION ALL SELECT 'quest', b.id, b.name, 'breadcrumb_for', NULL FROM quest q JOIN quest b ON b.id = q.breadcrumb_for WHERE q.id = ?1 UNION ALL SELECT 'quest', b.id, b.name, 'breadcrumb', NULL FROM quest b WHERE b.breadcrumb_for = ?1) ORDER BY link, id",
-                ),
+                (R::Chain, quest_chain!()),
                 (
                     R::Rewards,
                     "SELECT * FROM (SELECT 'item' AS kind, qi.item_id AS id, i.name, qi.count, CASE WHEN qi.role = 'choice' THEN 1 END AS choice, NULL AS value_id, NULL AS override FROM quest_item qi LEFT JOIN item i ON i.id = qi.item_id WHERE qi.quest_id = ?1 AND qi.role IN ('reward', 'choice') UNION ALL SELECT 'spell', s.id, s.name, NULL, NULL, NULL, NULL FROM quest q JOIN spell s ON s.id IN (q.reward_spell, q.reward_display_spell) WHERE q.id = ?1 UNION ALL SELECT 'faction', f.faction_id, fa.name, NULL, NULL, f.value_id, f.override FROM quest_reward_faction f LEFT JOIN faction fa ON fa.id = f.faction_id WHERE f.quest_id = ?1) ORDER BY kind, id",
@@ -286,7 +449,14 @@ impl Kind {
                 ),
                 (
                     R::TaughtBy,
-                    "SELECT * FROM (SELECT 'creature' AS kind, c.id, c.name, ts.cost, ts.req_level FROM trainer_spell ts JOIN creature_trainer ct ON ct.trainer_id = ts.trainer_id JOIN creature c ON c.id = ct.creature_id WHERE ts.spell_id = ?1 UNION ALL SELECT 'item', i.id, i.name, NULL, NULL FROM item_spell x JOIN item i ON i.id = x.item_id WHERE x.spell_id = ?1 AND x.trigger = 'LEARN_SPELL_ID' UNION ALL SELECT 'spell', s.id, s.name, NULL, NULL FROM spell_effect e JOIN spell s ON s.id = e.spell_id WHERE e.effect IN ('LEARN_SPELL', 'LEARN_PET_SPELL') AND e.trigger_spell = ?1 UNION ALL SELECT 'quest', q.id, q.name, NULL, NULL FROM quest q WHERE q.reward_spell = ?1 OR q.reward_display_spell = ?1) ORDER BY kind, id",
+                    concat!(
+                        "SELECT * FROM (SELECT 'creature' AS kind, c.id, c.name, ts.cost, ts.req_level",
+                        creature_zone!(),
+                        " FROM trainer_spell ts JOIN creature_trainer ct ON ct.trainer_id = ts.trainer_id JOIN creature c ON c.id = ct.creature_id WHERE ts.spell_id = ?1",
+                        " UNION ALL SELECT 'item', i.id, i.name, NULL, NULL, NULL, NULL FROM item_spell x JOIN item i ON i.id = x.item_id WHERE x.spell_id = ?1 AND x.trigger = 'LEARN_SPELL_ID'",
+                        " UNION ALL SELECT 'spell', s.id, s.name, NULL, NULL, NULL, NULL FROM spell_effect e JOIN spell s ON s.id = e.spell_id WHERE e.effect IN ('LEARN_SPELL', 'LEARN_PET_SPELL') AND e.trigger_spell = ?1",
+                        " UNION ALL SELECT 'quest', q.id, q.name, NULL, NULL, NULL, NULL FROM quest q WHERE q.reward_spell = ?1 OR q.reward_display_spell = ?1) ORDER BY kind, id"
+                    ),
                 ),
                 (
                     R::UsedBy,
@@ -308,10 +478,7 @@ impl Kind {
             Self::Gameobject => &[
                 (
                     R::Loot,
-                    concat!(
-                        loot_rows!(),
-                        " FROM gameobject g JOIN loot l ON l.source = 'gameobject' AND l.entry = g.loot_id LEFT JOIN item i ON i.id = l.item WHERE g.id = ?1 ORDER BY l.group_id, l.chance DESC, id"
-                    ),
+                    loot_tree!("l.source = 'gameobject' AND l.entry = (SELECT loot_id FROM gameobject WHERE id = ?1)"),
                 ),
                 (
                     R::Spawns,

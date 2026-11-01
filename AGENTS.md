@@ -25,9 +25,10 @@ All commands run from the repository root in Bash (MSYS2 UCRT64 on Windows). `ju
 
 - stdout carries MCP JSON-RPC frames; any other byte breaks clients. The server binary logs through `tracing` to stderr.
 - Runtime database access is read-only: attached databases are disabled and `meta.client_build` must exist. Do not add write paths.
-- Keep error channels distinct: invalid requests or malformed SQL return `invalid_params`, missing data or query failures return `CallToolResult::error`, and internal failures return `internal_error`.
+- Keep error channels distinct: arguments that fail to deserialize and unknown tool names return `invalid_params`; every error raised inside a tool (bad values, invalid SQL, a missing record, a query failure) returns `CallToolResult::error`, so the model can read it and correct the call; internal failures return `internal_error`. An empty result is a success, not an error.
 - Doc comments on tool parameter fields become the JSON Schema descriptions clients read; write them for the model.
-- The `instructions` argument of `#[tool_handler]` lists kinds and relations so clients need no discovery call. Update it when the tool set or contract changes.
+- The `instructions` argument of `#[tool_handler]` lists kinds, relations, and tables so clients need no discovery call. A test pins its table list to `sqlite_schema`. Update it when the tool set, schema, or contract changes.
+- Tool descriptions start with the game and build, and every tool carries read-only `annotations`. Keep both when you add a tool.
 
 ## Do not
 
