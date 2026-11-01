@@ -74,7 +74,11 @@ Step-by-step instructions for agents are in [docs/install.md](docs/install.md).
 |`related(kind, id, relation, limit?)`|List linked records, for example where an item drops (through shared loot tables), what a creature drops, sells, or trains, a whole quest chain, or the ranks of a spell. Default 50 rows, maximum 1000; a last line gives the total when rows are cut.|
 |`sql(query, limit?)`|Run one read-only SQLite statement. Default 200 rows, maximum 1000, 2-second time limit.|
 
-Output is compact `key=value` text (`sql` returns tab-separated rows). Zero, empty, and default fields are left out. Flags and enums are names. An empty answer is a normal result; a bad value or a missing record is a tool error with a message that tells the model how to fix the call. Every tool is marked read-only. The server instructions list every kind, relation, and table, so clients need no discovery call. To read one table's schema with column comments, run `SELECT sql FROM sqlite_schema WHERE name = 'loot'`.
+Output is compact `key=value` text (`sql` returns tab-separated rows). Zero, empty, and default fields are left out, except that spawn output preserves the valid `map=0` identifier. Flags and enums are names. An empty answer is a normal result; a bad value or a missing record is a tool error with a message that tells the model how to fix the call. Every tool is marked read-only. The server instructions list every kind, relation, and table, so clients need no discovery call. To read one table's schema with column comments, run `SELECT sql FROM sqlite_schema WHERE name = 'loot'`.
+
+Vendor `price` is the required gold in copper; `cost` lists extended costs. An extended-cost exchange does not require gold unless the item has `DONT_IGNORE_BUY_PRICE`. The item detail's `buy_price` remains the generic template price.
+
+Spawn output labels world coordinates as `world_x`, `world_y`, and `world_z`, not zone-map percentages. `orientation` is in radians and `spawn_time` is in seconds. `location_source=zone` identifies a zone name; `location_source=map` identifies a map-name fallback, which can be a continent. Missing zone or area fields mean unknown. Most TDB spawns lack this metadata, so an empty zone-filtered query does not prove there are no spawns.
 
 Example: `related(kind="spell", id=133, relation="ranks")` returns:
 

@@ -29,6 +29,7 @@ All commands run from the repository root in Bash (MSYS2 UCRT64 on Windows). `ju
 - Doc comments on tool parameter fields become the JSON Schema descriptions clients read; write them for the model.
 - The `instructions` argument of `#[tool_handler]` lists kinds, relations, and tables so clients need no discovery call. A test pins its table list to `sqlite_schema`. Update it when the tool set, schema, or contract changes.
 - Tool descriptions start with the game and build, and every tool carries read-only `annotations`. Keep both when you add a tool.
+- Preserve valid `map=0` in spawn relations. Label world coordinates and distinguish zone names from map-name fallbacks; missing zone metadata does not prove spawn absence.
 
 ## Do not
 

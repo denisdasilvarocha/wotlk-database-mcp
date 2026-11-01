@@ -54,9 +54,13 @@ const SOURCES: &[Source] = &[
         kind: "spell",
         terms: Terms::Subtext,
         sql: "SELECT CAST(id AS TEXT), name, NULL, NULLIF(trim(coalesce(rank || ' ', '') || coalesce(family, '')), ''), \
-              CASE WHEN EXISTS (SELECT 1 FROM spell_rank WHERE spell_id = spell.id) \
-                     OR EXISTS (SELECT 1 FROM skill_ability WHERE spell_id = spell.id) \
-                     OR EXISTS (SELECT 1 FROM trainer_spell WHERE spell_id = spell.id) THEN 0 ELSE 1 END \
+              CASE WHEN EXISTS (SELECT 1 FROM skill_ability WHERE spell_id = spell.id) \
+                     OR EXISTS (SELECT 1 FROM trainer_spell WHERE spell_id = spell.id) \
+                     OR EXISTS (SELECT 1 FROM talent_spell WHERE spell_id = spell.id) \
+                     OR EXISTS (SELECT 1 FROM spell_rank r WHERE r.spell_id = spell.id AND ( \
+                         EXISTS (SELECT 1 FROM skill_ability WHERE spell_id = r.first_spell_id) \
+                         OR EXISTS (SELECT 1 FROM trainer_spell WHERE spell_id = r.first_spell_id) \
+                         OR EXISTS (SELECT 1 FROM talent_spell WHERE spell_id = r.first_spell_id))) THEN 0 ELSE 1 END \
               FROM spell WHERE name IS NOT NULL AND name <> ''",
     },
     Source {

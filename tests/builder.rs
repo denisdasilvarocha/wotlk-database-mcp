@@ -189,6 +189,20 @@ fn search_priority_puts_player_spells_and_spawned_creatures_first() {
 }
 
 #[test]
+fn triggered_chain_ranks_below_player_chain() {
+    for (id, priority) in [
+        ("133", 0),
+        ("143", 0),
+        ("50001", 1),
+        ("50002", 1),
+        ("9053", 1),
+        ("11366", 0),
+    ] {
+        assert_eq!(search_value::<i64>("spell", id, "priority"), priority, "spell {id}");
+    }
+}
+
+#[test]
 fn search_spell_subtext_holds_rank_and_family() {
     assert_eq!(
         search_value::<Option<String>>("spell", "133", "subtext").as_deref(),

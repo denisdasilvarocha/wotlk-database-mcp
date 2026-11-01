@@ -48,3 +48,5 @@ The server uses stdio transport. It has no HTTP port and needs no environment va
 3. Call `sql` with `{"query": "SELECT 1 AS ok"}`. The result is the line `ok` followed by the line `1`.
 
 If the server does not connect, read its stderr. `database file not found` means the `--db` path is wrong. A missing binary means `just build` did not finish.
+
+After updating the server, rebuild with `just build` and reconnect the harness. Spell-search priority is stored in the generated database, so updating only the binary does not update its search index.

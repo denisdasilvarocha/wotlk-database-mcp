@@ -165,10 +165,18 @@ impl Fixtures {
                         r.name_lang = localized("Fiery Regalia Bonus");
                         r.name_subtext_lang = localized("");
                     }),
-                    // NPC copy of Fireball: shares the name but is not in spell_ranks,
-                    // skill_line_ability, or trainer_spell, so search ranks it below rank spells.
+                    // NPC copy of Fireball has no player acquisition entry.
                     spell_row(9053, |r| {
                         r.name_lang = localized("Fireball");
+                    }),
+                    // Ranked triggered copies likewise have no player acquisition entry.
+                    spell_row(50001, |r| {
+                        r.name_lang = localized("Fireball");
+                        r.name_subtext_lang = localized("Rank 1");
+                    }),
+                    spell_row(50002, |r| {
+                        r.name_lang = localized("Fireball");
+                        r.name_subtext_lang = localized("Rank 2");
                     }),
                 ],
             },

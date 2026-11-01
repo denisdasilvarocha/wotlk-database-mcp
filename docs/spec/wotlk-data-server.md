@@ -149,7 +149,7 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 
 ### Tool contract
 
-- `search(text, kind?, limit?)`: queries the unified index. Order: exact name, then name prefix, then the index `priority` (0 for player-learnable spells, which are in `spell_rank`, `skill_ability`, or `trainer_spell`, and for creatures with a spawn; 1 for the rest), then FTS5 `bm25`, shorter name, kind, and numeric id. A 1-character word matches whole tokens only, because the prefix index starts at 2 characters. Default limit 20, maximum 100. One line per hit: `kind id name [subtext]`. Spell subtext is rank and family (`Rank 1 MAGE`); creature subtext is title, level, and rank (`Mage Trainer, level 60`, `level 63 WORLDBOSS`). Creature level and rank are not indexed as search terms. `kind` accepts every kind except `meta`.
+- `search(text, kind?, limit?)`: queries the unified index. Order: exact name, then name prefix, then the index `priority` (0 for spells with a `skill_ability`, `trainer_spell`, or `talent_spell` acquisition entry, or whose `spell_rank` chain root has one of these entries, and for creatures with a spawn; 1 for the rest), then FTS5 `bm25`, shorter name, kind, and numeric id. Rank-chain membership alone does not establish player learnability: triggered damage spells can have their own chains. A 1-character word matches whole tokens only, because the prefix index starts at 2 characters. Default limit 20, maximum 100. One line per hit: `kind id name [subtext]`. Spell subtext is rank and family (`Rank 1 MAGE`); creature subtext is title, level, and rank (`Mage Trainer, level 60`, `level 63 WORLDBOSS`). Creature level and rank are not indexed as search terms. `kind` accepts every kind except `meta`.
 - `get(kind, id, fields?)`: returns one record. Each kind has a curated summary field set. `fields` adds named fields, or `all` returns every curated field. Fields that are zero, empty, or default are always left out.
 - `related(kind, id, relation, limit?)`: returns linked records as compact lines: `kind id name`, then extra `col=value` fields. Default limit 50, maximum 1000. When rows are cut, the last line is `-- <shown> of <total> shown; raise limit (max 1000)`. `kind` accepts only kinds that have relations. Supported relations:
   - item: `dropped_by` (with chance), `sold_by` (with cost), `reward_of`, `set` (with bonuses), `created_by`, `disenchant`. `dropped_by` follows reference loot up to 5 levels to the creatures, gameobjects, and items that use it; such rows carry `via=<innermost reference>` and the item's chance inside that reference. It shows no bare reference rows.
@@ -157,6 +157,8 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
   - quest: `givers`, `enders`, `chain`, `rewards`, `requirements`. `chain` returns the whole chain from first to last: ancestors through `prev_quest`, descendants through `next_quest`, `reward_next_quest`, and follow-ups, up to 50 steps each way. Each row has `step=` relative to the queried quest (0 is the quest itself with `link=self`). The relation uses `exclusive` for positive groups and `group_all` for negative groups. It reports `must_be_active=1` in both directions when `prev_quest` is negative.
   - spell: `ranks`, `taught_by`, `used_by`, `talent`, `glyph`, `triggered`.
   - gameobject: `loot`, `spawns`. area: `children`, `parent`. faction: `members`. achievement: `criteria`.
+  - Vendor `price` is required gold in copper, separate from extended `cost`. Include `price` when there is no extended cost or the item has `DONT_IGNORE_BUY_PRICE`. `get(item).buy_price` is the generic template price, not necessarily an exchange's gold component.
+  - Creature and gameobject `spawns` label `world_x`, `world_y`, and `world_z` as world coordinates, not zone-map percentages. `orientation` is radians; `spawn_time` is seconds. Preserve valid `map=0`. `location` is a zone name when available, otherwise a map name; `location_source=zone|map` states which. Missing zone/area fields mean unknown. Sparse zone metadata makes a zone-filtered empty result insufficient to establish spawn absence.
   - Creature rows of `sold_by`, `taught_by`, `givers`, and `enders` carry `faction=` and `zone=`: the zone of the creature's lowest-GUID spawn, or its map name when the spawn has no zone id (most TDB 335 spawns).
 - `sql(query, limit?)`: one read-only statement only. Default 200 rows, maximum 1000. A progress handler stops the query after 2 seconds. When rows are cut, the output says so. A statement with no rows returns the header and `-- no rows`. An SQLite authorizer also denies pragma assignments, transaction control, and `ATTACH`/`DETACH`; read-only pragmas such as `table_info` stay allowed.
 - Kinds: item, creature, spell, itemset, quest, gameobject, map, area, faction, talent, skill, glyph, achievement, offset, lua_function, lua_event, widget, cvar, lua_type, combatlog_event, secure_template, and `meta`.
@@ -182,13 +184,13 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
   - the spell resolver: `get` on a spell shows resolved values, and formulas stay unchanged.
   - offset status: each caveat marker shows the correct status enum.
   - precedence: a server-only `spell_dbc` row is not found; `Item.dbc` fills only missing items.
-  - ranking: an exact match ranks above prefix and partial matches; a player-learnable spell ranks above an NPC copy with the same name; a 1-letter search matches whole tokens.
+  - ranking: an exact match ranks above prefix and partial matches; player-learnable spell chains rank above same-name NPC copies and triggered-only rank chains; a 1-letter search matches whole tokens.
   - every relation listed in the tool contract, including reference loot through one and two levels, the whole quest chain, and the `faction=`/`zone=` fields.
   - `sql`: read-only refusal (including pragma assignments and transactions), row cap, truncation notice, and the empty result.
   - errors: `invalid_params` for malformed arguments, and tool errors for bad values and missing records.
   - `tools/list`: read-only annotations and kind enums without unusable kinds.
   - `meta`: build provenance.
-  - default omission: zero and default fields are not in the output.
+  - default omission: zero and default fields are not in the output, except the valid map ID 0 in spawn relations.
 - The builder's input checks have tests too. A wrong build or a missing input makes the entry point return an error, and no database file is left behind.
 - Prior art: the existing end-to-end test drives the `echo` tool through a real `rmcp` client over a Tokio in-memory duplex. The new tests follow the same pattern, with a fixture database in place of no data.
 

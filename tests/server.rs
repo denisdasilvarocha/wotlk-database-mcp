@@ -391,9 +391,31 @@ async fn all_relations_return_linked_fixture_records() {
             "creature",
             12056,
             "spawns",
-            &["spawn 1 Molten Core map=409 zone=2717 area=2717 x=759.5 y=-1040.25 z=-133.5 o=2 spawn_time=604800"],
+            &[
+                "map=409",
+                "zone=2717",
+                "area=2717",
+                "world_x=759.5",
+                "world_y=-1040.25",
+                "world_z=-133.5",
+                "orientation=2",
+                "spawn_time=604800",
+                "location=Molten Core",
+                "location_source=zone",
+            ],
         ),
-        ("gameobject", 2843, "spawns", &["spawn 1 Elwynn Forest"]),
+        (
+            "gameobject",
+            2843,
+            "spawns",
+            &[
+                "map=0",
+                "zone=12",
+                "area=87",
+                "location=Elwynn Forest",
+                "location_source=zone",
+            ],
+        ),
         ("creature", 12056, "spells", &["spell 133 Fireball rank=Rank 1"]),
         (
             "quest",
@@ -728,22 +750,191 @@ async fn item_spell_sentinels_are_not_imported() {
 #[tokio::test]
 async fn nested_vendor_references_expose_stock_in_both_directions() {
     let sells = success("related", json!({"kind":"creature","id":5002,"relation":"sells"})).await;
-    lines_include(
-        &sells,
-        &[
-            "item 4002 Fiery Brew Potion",
-            "item 19020 Tyrael's Hilt cost=honor:100,4002x2 max_count=1 restock_time=3600",
-        ],
+    let ordinary = sells
+        .lines()
+        .find(|line| line.starts_with("item 4002 "))
+        .expect("gold item");
+    assert!(ordinary.split_whitespace().any(|field| field == "price=250"), "{sells}");
+    let exchange = sells
+        .lines()
+        .find(|line| line.starts_with("item 19020 "))
+        .expect("exchange item");
+    for field in ["cost=honor:100,4002x2", "max_count=1", "restock_time=3600"] {
+        assert!(exchange.split_whitespace().any(|value| value == field), "{sells}");
+    }
+    assert!(
+        !exchange.split_whitespace().any(|field| field.starts_with("price=")),
+        "{sells}"
     );
     let sold_by = success("related", json!({"kind":"item","id":4002,"relation":"sold_by"})).await;
-    lines_include(
-        &sold_by,
-        &[
-            "creature 5000 Brew Vendor faction=Stormwind zone=Eastern Kingdoms",
-            "creature 5001 Fire Trainer faction=Stormwind zone=Elwynn Forest",
-            "creature 5002 Marshal Dughan faction=Stormwind zone=Elwynn Forest",
-        ],
+    for (prefix, zone) in [
+        ("creature 5000 Brew Vendor", "zone=Eastern Kingdoms"),
+        ("creature 5001 Fire Trainer", "zone=Elwynn Forest"),
+        ("creature 5002 Marshal Dughan", "zone=Elwynn Forest"),
+    ] {
+        let vendor = sold_by
+            .lines()
+            .find(|line| line.starts_with(prefix))
+            .expect("nested vendor");
+        assert!(vendor.contains("faction=Stormwind"), "{sold_by}");
+        assert!(vendor.contains(zone), "{sold_by}");
+        assert!(vendor.split_whitespace().any(|field| field == "price=250"), "{sold_by}");
+    }
+}
+
+#[tokio::test]
+async fn vendor_extended_cost_gold_rule_both_directions() {
+    let sells = success("related", json!({"kind":"creature","id":5000,"relation":"sells"})).await;
+    let exchange = sells
+        .lines()
+        .find(|line| line.starts_with("item 19020 "))
+        .expect("exchange item");
+    assert!(
+        !exchange.split_whitespace().any(|field| field.starts_with("price=")),
+        "{sells}"
     );
+    for field in ["cost=honor:100,4002x2", "max_count=1", "restock_time=3600"] {
+        assert!(exchange.split_whitespace().any(|value| value == field), "{sells}");
+    }
+    let gold_exchange = sells
+        .lines()
+        .find(|line| line.starts_with("item 19022 "))
+        .expect("gold exchange");
+    for field in ["price=999", "cost=honor:100,4002x2"] {
+        assert!(gold_exchange.split_whitespace().any(|value| value == field), "{sells}");
+    }
+    let ordinary = sells
+        .lines()
+        .find(|line| line.starts_with("item 4002 "))
+        .expect("gold item");
+    assert!(ordinary.split_whitespace().any(|field| field == "price=250"), "{sells}");
+    assert!(
+        !ordinary.split_whitespace().any(|field| field.starts_with("cost=")),
+        "{sells}"
+    );
+
+    for (id, price) in [(19020, None), (19022, Some("price=999")), (4002, Some("price=250"))] {
+        let sold_by = success("related", json!({"kind":"item","id":id,"relation":"sold_by"})).await;
+        let vendor = sold_by
+            .lines()
+            .find(|line| line.starts_with("creature 5000 "))
+            .expect("vendor");
+        match price {
+            Some(price) => assert!(vendor.split_whitespace().any(|field| field == price), "{sold_by}"),
+            None => assert!(
+                !vendor.split_whitespace().any(|field| field.starts_with("price=")),
+                "{sold_by}"
+            ),
+        }
+        if id == 4002 {
+            assert!(
+                !vendor.split_whitespace().any(|field| field.starts_with("cost=")),
+                "{sold_by}"
+            );
+        } else {
+            assert!(
+                vendor.split_whitespace().any(|field| field == "cost=honor:100,4002x2"),
+                "{sold_by}"
+            );
+        }
+        if id == 19020 {
+            for field in ["max_count=1", "restock_time=3600"] {
+                assert!(vendor.split_whitespace().any(|value| value == field), "{sold_by}");
+            }
+        }
+    }
+    let item = success("get", json!({"kind":"item","id":19020,"fields":["buy_price"]})).await;
+    lines_include(&item, &["buy_price=12345"]);
+}
+
+#[tokio::test]
+async fn spawns_label_map_zero_and_world_coordinates() {
+    for (kind, id, guid) in [("creature", 5000, "5"), ("gameobject", 2843, "2")] {
+        let result = success("related", json!({"kind":kind,"id":id,"relation":"spawns"})).await;
+        let prefix = format!("spawn {guid} ");
+        let spawn = result
+            .lines()
+            .find(|line| line.starts_with(&prefix))
+            .expect("map-zero spawn");
+        for field in [
+            "map=0",
+            "world_x=-10107.2",
+            "world_y=617.835",
+            "world_z=38.0838",
+            "orientation=5.98131",
+            "spawn_time=300",
+            "location_source=map",
+        ] {
+            assert!(spawn.split_whitespace().any(|value| value == field), "{kind}: {result}");
+        }
+        assert!(spawn.contains(" location=Eastern Kingdoms"), "{kind}: {result}");
+        for key in ["zone=", "area=", "x=", "y=", "z=", "o="] {
+            assert!(
+                !spawn.split_whitespace().any(|field| field.starts_with(key)),
+                "{kind}: {result}"
+            );
+        }
+        assert!(!spawn.contains("spawn 5 Eastern Kingdoms"), "{result}");
+        assert!(!spawn.contains("spawn 2 Eastern Kingdoms"), "{result}");
+    }
+
+    for (kind, id, fields, location) in [
+        (
+            "creature",
+            12056,
+            &["map=409", "zone=2717", "area=2717"][..],
+            "Molten Core",
+        ),
+        (
+            "gameobject",
+            2843,
+            &["map=0", "zone=12", "area=87"][..],
+            "Elwynn Forest",
+        ),
+    ] {
+        let result = success("related", json!({"kind":kind,"id":id,"relation":"spawns"})).await;
+        let spawn = result
+            .lines()
+            .find(|line| line.starts_with("spawn 1 "))
+            .expect("known-zone spawn");
+        for field in fields {
+            assert!(
+                spawn.split_whitespace().any(|value| value == *field),
+                "{kind}: {result}"
+            );
+        }
+        assert!(spawn.contains(&format!(" location={location}")), "{kind}: {result}");
+        assert!(
+            spawn.split_whitespace().any(|field| field == "location_source=zone"),
+            "{kind}: {result}"
+        );
+    }
+
+    let result = success("related", json!({"kind":"creature","id":5000,"relation":"spawns"})).await;
+    let sparse = result
+        .lines()
+        .find(|line| line.starts_with("spawn 4 "))
+        .expect("sparse spawn");
+    assert!(sparse.split_whitespace().any(|field| field == "map=0"), "{result}");
+    assert!(sparse.contains(" location=Eastern Kingdoms"), "{result}");
+    assert!(
+        sparse.split_whitespace().any(|field| field == "location_source=map"),
+        "{result}"
+    );
+    for key in [
+        "zone=",
+        "area=",
+        "world_x=",
+        "world_y=",
+        "world_z=",
+        "orientation=",
+        "spawn_time=",
+    ] {
+        assert!(
+            !sparse.split_whitespace().any(|field| field.starts_with(key)),
+            "{result}"
+        );
+    }
 }
 
 /// Resolves one parameter schema of a tool and collects its `enum` values.
@@ -913,6 +1104,27 @@ async fn search_ranks_learnable_spells_above_npc_copies() {
     let learnable = results.find("spell 133 Fireball").expect("player spell");
     let copy = results.find("spell 9053 Fireball").expect("npc copy");
     assert!(learnable < copy, "{results}");
+}
+
+#[tokio::test]
+async fn search_ranks_player_chain_above_triggered_chain() {
+    let results = success("search", json!({"text":"fireball","kind":"spell"})).await;
+    let positions: Vec<_> = [133, 143, 9053, 50001, 50002]
+        .into_iter()
+        .map(|id| {
+            let prefix = format!("spell {id} ");
+            results
+                .lines()
+                .position(|line| line.starts_with(&prefix))
+                .expect("spell hit")
+        })
+        .collect();
+    for player in &positions[..2] {
+        for triggered in &positions[3..] {
+            assert!(player < triggered, "{results}");
+        }
+    }
+    assert!(positions[2] < positions[3], "{results}");
 }
 
 #[tokio::test]

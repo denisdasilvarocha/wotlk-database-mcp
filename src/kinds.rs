@@ -146,7 +146,7 @@ macro_rules! loot_tree {
 }
 
 // Faction name and the zone of the lowest-GUID spawn of creature `c`. Most TDB 335 spawns
-// have no zone id, so the zone falls back to the map name, as in the spawns relation.
+// have no zone id, so this field falls back to the map name.
 macro_rules! creature_zone {
     () => {
         ", c.faction, (SELECT coalesce(a.name, m.name) FROM creature_spawn s LEFT JOIN area a ON a.id = s.zone LEFT JOIN map m ON m.id = s.map WHERE s.creature_id = c.id ORDER BY s.guid LIMIT 1) AS zone"
@@ -362,7 +362,7 @@ impl Kind {
                 (
                     R::SoldBy,
                     concat!(
-                        "SELECT 'creature', c.id, c.name, i.buy_price AS price, v.cost, v.max_count, v.restock_time",
+                        "SELECT 'creature', c.id, c.name, CASE WHEN v.extended_cost IS NULL OR instr(coalesce(i.flags2, ''), 'DONT_IGNORE_BUY_PRICE') > 0 THEN i.buy_price END AS price, v.cost, v.max_count, v.restock_time",
                         creature_zone!(),
                         " FROM vendor v JOIN creature c ON c.id = v.creature_id LEFT JOIN item i ON i.id = v.item_id WHERE v.item_id = ?1 ORDER BY c.id"
                     ),
@@ -391,7 +391,7 @@ impl Kind {
                 ),
                 (
                     R::Sells,
-                    "SELECT 'item', v.item_id, i.name, i.buy_price AS price, v.cost, v.max_count, v.restock_time FROM vendor v LEFT JOIN item i ON i.id = v.item_id WHERE v.creature_id = ?1 ORDER BY v.slot, v.item_id",
+                    "SELECT 'item', v.item_id, i.name, CASE WHEN v.extended_cost IS NULL OR instr(coalesce(i.flags2, ''), 'DONT_IGNORE_BUY_PRICE') > 0 THEN i.buy_price END AS price, v.cost, v.max_count, v.restock_time FROM vendor v LEFT JOIN item i ON i.id = v.item_id WHERE v.creature_id = ?1 ORDER BY v.slot, v.item_id",
                 ),
                 (
                     R::Trains,
@@ -407,7 +407,7 @@ impl Kind {
                 ),
                 (
                     R::Spawns,
-                    "SELECT 'spawn', s.guid, coalesce(z.name, m.name), s.map, s.zone, s.area, s.x, s.y, s.z, s.orientation AS o, s.spawn_time FROM creature_spawn s LEFT JOIN area z ON z.id = s.zone LEFT JOIN map m ON m.id = s.map WHERE s.creature_id = ?1 ORDER BY s.guid",
+                    "SELECT 'spawn', s.guid, NULL, CAST(s.map AS TEXT) AS map, s.zone, s.area, s.x AS world_x, s.y AS world_y, s.z AS world_z, s.orientation, s.spawn_time, coalesce(z.name, m.name) AS location, CASE WHEN z.name IS NOT NULL THEN 'zone' WHEN m.name IS NOT NULL THEN 'map' END AS location_source FROM creature_spawn s LEFT JOIN area z ON z.id = s.zone LEFT JOIN map m ON m.id = s.map WHERE s.creature_id = ?1 ORDER BY s.guid",
                 ),
                 (
                     R::Spells,
@@ -482,7 +482,7 @@ impl Kind {
                 ),
                 (
                     R::Spawns,
-                    "SELECT 'spawn', s.guid, coalesce(z.name, m.name), s.map, s.zone, s.area, s.x, s.y, s.z, s.orientation AS o, s.spawn_time FROM gameobject_spawn s LEFT JOIN area z ON z.id = s.zone LEFT JOIN map m ON m.id = s.map WHERE s.gameobject_id = ?1 ORDER BY s.guid",
+                    "SELECT 'spawn', s.guid, NULL, CAST(s.map AS TEXT) AS map, s.zone, s.area, s.x AS world_x, s.y AS world_y, s.z AS world_z, s.orientation, s.spawn_time, coalesce(z.name, m.name) AS location, CASE WHEN z.name IS NOT NULL THEN 'zone' WHEN m.name IS NOT NULL THEN 'map' END AS location_source FROM gameobject_spawn s LEFT JOIN area z ON z.id = s.zone LEFT JOIN map m ON m.id = s.map WHERE s.gameobject_id = ?1 ORDER BY s.guid",
                 ),
             ],
             Self::Area => &[
