@@ -8,6 +8,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 description = "MCP server for the World of Warcraft: Wrath of the Lich King database"
+repository = "https://github.com/denisdasilvarocha/wotlk-database-mcp"
 publish = false
 
 [dependencies]
@@ -54,3 +55,10 @@ print_stdout = "warn"
 todo = "warn"
 unimplemented = "warn"
 unwrap_used = "warn"
+
+[package.metadata.dist]
+dist = true
+
+[profile.dist]
+inherits = "release"
+lto = "thin"

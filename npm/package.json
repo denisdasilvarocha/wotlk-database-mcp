@@ -1,0 +1,9 @@
+{
+  "name": "wotlk-database-mcp",
+  "version": "0.0.0",
+  "description": "World of Warcraft 3.3.5a database MCP server",
+  "repository": { "type": "git", "url": "git+https://github.com/denisdasilvarocha/wotlk-database-mcp.git" },
+  "bin": { "wotlk-database-mcp": "bin/launcher.cjs" },
+  "files": ["bin/launcher.cjs"],
+  "engines": { "node": ">=22" }
+}

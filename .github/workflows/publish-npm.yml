@@ -1,0 +1,104 @@
+name: Publish npm packages
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  smoke:
+    name: Packed release smoke (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: ubuntu-22.04-arm
+            platform: linux-arm64
+          - os: macos-14
+            platform: darwin-arm64
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: windows-2022
+            platform: win32-x64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: artifacts-build-local-*
+          path: dist-archives
+          merge-multiple: true
+      - name: Pack and check host packages
+        env:
+          VERSION: ${{ fromJson(inputs.plan).releases[0].app_version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          node npm/build.mjs "$VERSION" dist-archives packed "$PLATFORM"
+          node npm/check-packages.mjs packed
+      - name: Install without scripts and list MCP tools
+        run: |
+          install_dir="$RUNNER_TEMP/npm-smoke"
+          mkdir -p "$install_dir"
+          npm install --prefix "$install_dir" --ignore-scripts --no-audit --no-fund "$PWD"/packed/*.tgz
+          node npm/smoke.mjs "$install_dir"
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install OIDC-capable npm
+        run: npm install --global npm@12.2.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: artifacts-build-local-*
+          path: dist-archives
+          merge-multiple: true
+      - name: Pack all packages and reject database payloads
+        env:
+          VERSION: ${{ fromJson(inputs.plan).releases[0].app_version }}
+        run: |
+          node npm/build.mjs "$VERSION" dist-archives packed
+          node npm/check-packages.mjs packed
+      # Configure all six npm names to trust the calling workflow release.yml,
+      # owner denisdasilvarocha, repository wotlk-database-mcp, allowing npm publish.
+      - name: Publish platform packages, then launcher
+        shell: bash
+        env:
+          VERSION: ${{ fromJson(inputs.plan).releases[0].app_version }}
+        run: |
+          set -euo pipefail
+          tag=latest
+          if [[ "$VERSION" == *-* ]]; then tag=next; fi
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
+            npm publish "packed/wotlk-database-mcp-${platform}-${VERSION}.tgz" --access public --tag "$tag"
+          done
+          npm publish "packed/wotlk-database-mcp-${VERSION}.tgz" --access public --tag "$tag"
