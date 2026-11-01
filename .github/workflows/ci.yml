@@ -1,6 +1,7 @@
-# Every gate comes from the repository itself: `just check` runs prek, which
-# runs the same formatting, lint, test, doc, and dependency checks as local
-# hooks. CI adds a workflow lint and a release build on every platform.
+# Linux runs every repository gate with `just check`: hygiene, fmt, clippy,
+# tests, docs, and dependencies. macOS and Windows run the platform-dependent
+# part, `just test`. Every OS then packs the debug binary that the tests built,
+# installs it with npm without scripts, and lists the MCP tools through the launcher.
 name: CI
 
 on:
@@ -8,6 +9,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -26,12 +31,18 @@ jobs:
         include:
           - os: ubuntu-latest
             shell: bash
+            recipe: check
+            tools: just,prek,taplo,cargo-deny,cargo-shear
           - os: macos-latest
             shell: bash
+            recipe: test
+            tools: just
           # Native Windows build with MSYS2 UCRT64. The justfile and test
           # scripts require the MSYS2 Bash environment, not Git Bash or WSL.
           - os: windows-latest
             shell: msys2 {0}
+            recipe: test
+            tools: just
     steps:
       # .gitattributes checks out LF, but the Windows runner enables
       # core.autocrlf globally; disable it before checkout so nothing converts.
@@ -97,7 +108,7 @@ jobs:
       - name: Install build tools
         uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
-          tool: just,prek,taplo,cargo-deny,cargo-shear
+          tool: ${{ matrix.tools }}
           # Every tool has a checksummed prebuilt release on all three targets.
           fallback: none
 
@@ -110,50 +121,26 @@ jobs:
           cache-bin: false
 
       - name: Check
-        run: just check
-
-      - name: Build release
-        run: cargo build --workspace --release --locked
-
-  npm-smoke:
-    name: npm install without scripts (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, macos-15, windows-2022]
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          lfs: false
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        run: just ${{ matrix.recipe }}
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           package-manager-cache: false
-      - name: Set up Rust
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          cache-bin: false
-      - name: Build server
-        run: cargo build --release --locked --package wotlk-database-mcp
-      - name: Test packaging
+      # The test files write POSIX shell scripts as fake binaries.
+      - name: Test npm packaging
         if: runner.os != 'Windows'
+        shell: bash
         run: node --test npm/*.test.mjs
-      - name: Pack host packages
+      # `cargo test` already built target/debug for the CLI integration tests.
+      # `0.0.0-ci` is never published, so --offline skips the other platform packages.
+      - name: Pack, install without scripts, and list MCP tools
+        shell: bash
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "wotlk-database-mcp") | .version')
           platform=$(node -p 'process.platform + "-" + process.arch')
-          node npm/build.mjs "$version" target/release packed "$platform"
-          node npm/check-packages.mjs packed
-      - name: Install without scripts and list MCP tools
-        run: |
-          install_dir="$RUNNER_TEMP/npm-smoke"
-          mkdir -p "$install_dir"
-          npm install --prefix "$install_dir" --ignore-scripts --no-audit --no-fund "$PWD"/packed/*.tgz
-          node npm/smoke.mjs "$install_dir"
+          binary=target/debug/wotlk-database-mcp
+          if [[ $RUNNER_OS == Windows ]]; then binary+=.exe; fi
+          node npm/build.mjs 0.0.0-ci packed "$platform=$binary"
+          mkdir -p "$RUNNER_TEMP/npm-smoke"
+          npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund --offline "$PWD"/packed/*.tgz
+          node npm/smoke.mjs "$RUNNER_TEMP/npm-smoke"

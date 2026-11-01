@@ -1,81 +1,80 @@
-import { mkdir, readFile, writeFile, copyFile, chmod, readdir, mkdtemp, rm, access } from 'node:fs/promises';
-import { join, resolve, basename } from 'node:path';
+// Stages and packs the npm packages: one per native binary, plus the launcher.
+// Usage: node npm/build.mjs VERSION OUTPUT_DIR PLATFORM=PATH...
+// PATH is the server binary, or the dist release archive (.tar.xz or .zip) that holds it.
+import { execFileSync, execSync } from 'node:child_process';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
-import { spawnNpm } from './npm-command.mjs';
+import { basename, join, resolve } from 'node:path';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const targets = {
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'darwin-x64': 'x86_64-apple-darwin',
-  'linux-x64': 'x86_64-unknown-linux-gnu',
-  'linux-arm64': 'aarch64-unknown-linux-gnu',
-  'win32-x64': 'x86_64-pc-windows-msvc',
-};
-const [version, inputArg, outputArg, platform, ...extra] = process.argv.slice(2);
-if (!version || !inputArg || !outputArg || extra.length || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version) || (platform && !targets[platform])) {
-  throw new Error('Usage: node npm/build.mjs VERSION INPUT_DIR OUTPUT_DIR [PLATFORM]');
+const platforms = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64'];
+const repository = { type: 'git', url: 'git+https://github.com/denisdasilvarocha/wotlk-database-mcp.git' };
+// Git Bash puts GNU tar first on PATH; the Windows bsdtar reads zip and drive-letter paths.
+const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+
+const [version, outputArg, ...sources] = process.argv.slice(2);
+if (!version || !outputArg || sources.length === 0) {
+  throw new Error('Usage: node npm/build.mjs VERSION OUTPUT_DIR PLATFORM=PATH...');
 }
-const input = resolve(inputArg);
 const output = resolve(outputArg);
-await mkdir(output, { recursive: true });
-function run(command, args, cwd) {
-  const options = { cwd, encoding: 'utf8' };
-  const result = command === 'npm' ? spawnNpm(args, options) : spawnSync(command, args, options);
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} failed: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-async function exists(path) { try { await access(path); return true; } catch { return false; } }
-async function findBinary(directory, name) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isFile() && entry.name === name) return path;
-    if (entry.isDirectory()) { const found = await findBinary(path, name); if (found) return found; }
+// Fails when the directory exists, so stale packages are never packed again.
+await mkdir(output);
+
+const writeManifest = (directory, manifest) =>
+  writeFile(join(directory, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
+// dist archives hold `<archive name>/<binary>` (.tar.xz) or `<binary>` (.zip).
+const extract = (archive, binary, directory) => {
+  if (archive.endsWith('.zip')) {
+    // GNU tar on Linux cannot read zip.
+    if (process.platform === 'linux') execFileSync('unzip', ['-q', archive, '-d', directory]);
+    else execFileSync(tar, ['-xf', archive, '-C', directory]);
+    return join(directory, binary);
   }
-}
-async function pack(directory) {
-  const info = JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', output], directory));
-  console.log(join(output, Object.values(info)[0].filename));
-}
-for (const [key, target] of Object.entries(targets)) {
-  if (platform && key !== platform) continue;
-  const [os, cpu] = key.split('-');
-  const name = `wotlk-database-mcp-${key}`;
-  const binary = `wotlk-database-mcp${os === 'win32' ? '.exe' : ''}`;
-  const directory = join(output, name);
-  if (await exists(directory)) throw new Error(`Output package already exists: ${directory}`);
-  await mkdir(join(directory, 'bin'), { recursive: true });
-  let source;
-  const hostCandidates = key === `${process.platform}-${process.arch}` ? [join(input, binary), join(input, 'release', binary), join(input, 'target', 'release', binary)] : [];
-  for (const candidate of [join(input, target, 'release', binary), join(input, 'target', target, 'release', binary), join(input, `wotlk-database-mcp-${target}`, binary), ...hostCandidates]) {
-    if (await exists(candidate)) { source = candidate; break; }
+  execFileSync(tar, ['-xf', archive, '-C', directory]);
+  return join(directory, basename(archive, '.tar.xz'), binary);
+};
+
+const packages = [];
+for (const source of sources) {
+  const [, platform, path] = /^([^=]+)=(.+)$/.exec(source) ?? [];
+  if (!platforms.includes(platform)) {
+    throw new Error(`Expected PLATFORM=PATH with PLATFORM in ${platforms.join(', ')}, got ${source}`);
   }
-  const temporary = await mkdtemp(join(tmpdir(), 'wotlk-npm-extract-'));
-  try {
-    if (!source) {
-      const archive = (await readdir(input)).find(file => file.includes(target) && /\.(tar\.xz|zip)$/.test(file));
-      if (!archive) throw new Error(`Missing binary or dist archive for ${target} in ${input}`);
-      if (archive.endsWith('.zip') && process.platform !== 'win32') run('unzip', ['-q', join(input, archive), '-d', temporary]);
-      // Git Bash puts GNU tar first on PATH, which reads `D:\...` as a remote host; Windows' bsdtar also reads zip.
-      else run(process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar', ['-xf', join(input, archive), '-C', temporary]);
-      source = await findBinary(temporary, binary);
-      if (!source) throw new Error(`Missing ${binary} in ${basename(archive)}`);
+  const [os, cpu] = platform.split('-');
+  const binary = os === 'win32' ? 'wotlk-database-mcp.exe' : 'wotlk-database-mcp';
+  const name = `wotlk-database-mcp-${platform}`;
+  const bin = join(output, name, 'bin');
+  // Non-recursive: a repeated platform fails here.
+  await mkdir(join(output, name));
+  await mkdir(bin);
+  if (/\.(tar\.xz|zip)$/.test(path)) {
+    const scratch = await mkdtemp(join(tmpdir(), 'wotlk-npm-'));
+    try {
+      await copyFile(extract(resolve(path), binary, scratch), join(bin, binary));
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
     }
-    await copyFile(source, join(directory, 'bin', binary));
-    await chmod(join(directory, 'bin', binary), 0o755);
-  } finally { await rm(temporary, { recursive: true, force: true }); }
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ name, version, description: `Native ${key} binary for wotlk-database-mcp`, repository: { type: 'git', url: 'git+https://github.com/denisdasilvarocha/wotlk-database-mcp.git' }, os: [os], cpu: [cpu], ...(os === 'linux' ? { libc: ['glibc'] } : {}), preferUnplugged: true, files: ['bin/'] }, null, 2) + '\n');
-  await pack(directory);
+  } else {
+    await copyFile(path, join(bin, binary));
+  }
+  await chmod(join(bin, binary), 0o755);
+  await writeManifest(join(output, name), {
+    name, version, description: `Native ${platform} binary for wotlk-database-mcp`, repository,
+    os: [os], cpu: [cpu], ...(os === 'linux' && { libc: ['glibc'] }), preferUnplugged: true, files: ['bin/'],
+  });
+  packages.push(name);
 }
-const launcherDir = join(output, 'wotlk-database-mcp');
-if (await exists(launcherDir)) throw new Error(`Output package already exists: ${launcherDir}`);
+
+const launcher = JSON.parse(await readFile(new URL('package.json', import.meta.url), 'utf8'));
+const launcherDir = join(output, launcher.name);
 await mkdir(join(launcherDir, 'bin'), { recursive: true });
-const manifest = JSON.parse(await readFile(join(here, 'package.json'), 'utf8'));
-manifest.version = version;
-manifest.optionalDependencies = Object.fromEntries(Object.keys(targets).map(key => [`wotlk-database-mcp-${key}`, version]));
-await writeFile(join(launcherDir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n');
-await copyFile(join(here, 'launcher.cjs'), join(launcherDir, 'bin/launcher.cjs'));
-await chmod(join(launcherDir, 'bin/launcher.cjs'), 0o755);
-await pack(launcherDir);
+await copyFile(new URL('launcher.cjs', import.meta.url), join(launcherDir, 'bin', 'launcher.cjs'));
+await chmod(join(launcherDir, 'bin', 'launcher.cjs'), 0o755);
+await writeManifest(launcherDir, {
+  ...launcher, version,
+  optionalDependencies: Object.fromEntries(platforms.map(platform => [`wotlk-database-mcp-${platform}`, version])),
+});
+packages.push(launcher.name);
+
+// A shell lets Windows find npm.cmd. Package names are fixed, so nothing needs quoting.
+execSync(`npm pack ${packages.map(name => `./${name}`).join(' ')}`, { cwd: output, stdio: 'inherit' });

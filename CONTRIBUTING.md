@@ -88,15 +88,19 @@ The line-ending hook uses `--fix=lf`. Local recipe hooks always run across the w
 
 ## Inspect CI failures
 
-The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It runs `just check` and a locked workspace release build on these runners:
+The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It uses one job per runner:
 
-| Runner | Shell |
-| --- | --- |
-| `ubuntu-latest` | Bash. |
-| `macos-latest` | Bash. |
-| `windows-latest` | MSYS2 UCRT64. |
+| Runner | Shell | Checks |
+| --- | --- | --- |
+| `ubuntu-latest` | Bash. | `just check`, workflow lint, npm packaging tests, and npm smoke. |
+| `macos-latest` | Bash. | `just test`, npm packaging tests, and npm smoke. |
+| `windows-latest` | MSYS2 UCRT64. | `just test` and npm smoke. |
 
-The Linux job also runs the pinned `actionlint` container. CI skips Git LFS payload downloads. Tests use fixtures instead of the full database.
+Each npm smoke check packs the debug binary built by the tests. It installs the packages without scripts and lists the MCP tools through the launcher. CI does not build release binaries.
+
+Only Linux runs clippy, so CI does not lint Windows-only code. New pushes cancel older CI runs for the same pull request.
+
+The Linux job runs the pinned `actionlint` container. CI skips Git LFS payload downloads. Tests use fixtures instead of the full database.
 
 With GitHub CLI access to this private repository, inspect the failed run:
 
