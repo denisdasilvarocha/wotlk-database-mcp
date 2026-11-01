@@ -81,12 +81,12 @@ fn id_text(id: &Value) -> String {
     }
 }
 
-fn bounded_limit(limit: Option<u32>, default: u32, max: u32) -> Result<usize, QueryError> {
+fn bounded_limit(limit: Option<u32>, default: u32, max: u32) -> Result<u32, QueryError> {
     let limit = limit.unwrap_or(default);
     if limit == 0 || limit > max {
         return Err(QueryError::Invalid(format!("limit must be between 1 and {max}")));
     }
-    Ok(limit as usize)
+    Ok(limit)
 }
 
 pub(crate) fn search(
@@ -108,7 +108,6 @@ pub(crate) fn search(
     }
     let limit = bounded_limit(limit, 20, 100)?;
     let mut stmt = conn.prepare("SELECT kind, id, name, subtext FROM search WHERE search MATCH ?1 AND (?3 IS NULL OR kind = ?3) ORDER BY CASE WHEN lower(name) = lower(?2) THEN 0 WHEN substr(lower(name), 1, length(?2)) = lower(?2) THEN 1 ELSE 2 END, bm25(search, 10.0, 1.0), length(name), kind, id LIMIT ?4")?;
-    let limit = i64::try_from(limit).map_err(|_| QueryError::Invalid("limit is too large".to_owned()))?;
     let mut rows = stmt.query(params![tokens.join(" "), text, kind.map(Kind::as_str), limit])?;
     let mut lines = Vec::new();
     while let Some(row) = rows.next()? {
@@ -263,7 +262,7 @@ pub(crate) fn sql(conn: &mut Connection, query: &str, limit: Option<u32>) -> Res
     if query.trim().is_empty() {
         return Err(QueryError::Invalid("query is empty".to_owned()));
     }
-    let limit = bounded_limit(limit, 200, 1000)?;
+    let limit = bounded_limit(limit, 200, 1000)? as usize;
     let start = Instant::now();
     conn.progress_handler(1000, Some(move || start.elapsed() > Duration::from_secs(2)))?;
     let result = execute_sql(conn, query, limit);

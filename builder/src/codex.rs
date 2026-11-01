@@ -194,6 +194,15 @@ pub(crate) fn import(conn: &Connection, dir: &Path) -> Result<String, BuildError
         path,
         message: e.to_string(),
     })?;
+    insert(conn, &data)?;
+    Ok(commit.to_owned())
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keeping the fixed codex-to-SQL mappings together makes them easier to audit"
+)]
+fn insert(conn: &Connection, data: &Codex) -> Result<(), BuildError> {
     {
         let mut stmt = conn.prepare("INSERT INTO lua_function (name, signature, description, parameters, returns, category, subcategory, tags, protected, hw_event, address, related, patch, url, examples, book_page) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)")?;
         for f in &data.functions {
@@ -232,11 +241,6 @@ pub(crate) fn import(conn: &Connection, dir: &Path) -> Result<String, BuildError
             ])?;
         }
     }
-    insert_remaining(conn, &data)?;
-    Ok(commit.to_owned())
-}
-
-fn insert_remaining(conn: &Connection, data: &Codex) -> Result<(), BuildError> {
     {
         let mut stmt = conn.prepare("INSERT INTO widget (name, description, category, inherits, methods, inherited_methods, script_handlers, book_page) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)")?;
         for w in &data.widgets {

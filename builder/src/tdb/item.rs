@@ -153,207 +153,218 @@ impl<'conn> Importer<'conn> {
         })
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "The item row mapping is kept together with its SQL insert"
+    )]
     pub(super) fn import(&mut self, _table: &str, row: &Row<'_>, dbc: &Context) -> Result<(), BuildError> {
-        import(&mut self.item, &mut self.item_spell, row, dbc)
+        let id = row.int("entry")?;
+        let class = row.int("class")?;
+        let subclass = row.int("subclass")?;
+        let display = row.int("displayid")?;
+        let display_id = checked_i32(display, "displayid", row.line())?;
+        let slot = row.int("InventoryType")?;
+        let bonding = row.int("bonding")?;
+        let allowed_classes = row.int("AllowableClass")?;
+        let allowed_races = row.int("AllowableRace")?;
+        let class_mask = if allowed_classes == -1 {
+            0
+        } else {
+            checked_u32(allowed_classes, "AllowableClass", row.line())?
+        };
+        let race_mask = if allowed_races == -1 {
+            0
+        } else {
+            checked_u32(allowed_races, "AllowableRace", row.line())?
+        };
+        let faction = row.int("RequiredReputationFaction")?;
+        let buy_count = row.int("BuyCount")?;
+        let stackable = row.int("stackable")?;
+        let disenchant_skill = row.int("RequiredDisenchantSkill")?;
+        let mut stats = Vec::new();
+        for (kind, value) in [
+            ("stat_type1", "stat_value1"),
+            ("stat_type2", "stat_value2"),
+            ("stat_type3", "stat_value3"),
+            ("stat_type4", "stat_value4"),
+            ("stat_type5", "stat_value5"),
+            ("stat_type6", "stat_value6"),
+            ("stat_type7", "stat_value7"),
+            ("stat_type8", "stat_value8"),
+            ("stat_type9", "stat_value9"),
+            ("stat_type10", "stat_value10"),
+        ] {
+            let amount = row.int(value)?;
+            if amount != 0 {
+                let name = names::enum_name(names::ITEM_MOD_TYPE, row.int(kind)?).unwrap_or_default();
+                stats.push(format!("{name} {amount:+}"));
+            }
+        }
+        let mut damage = Vec::new();
+        for (min, max, school) in [
+            ("dmg_min1", "dmg_max1", "dmg_type1"),
+            ("dmg_min2", "dmg_max2", "dmg_type2"),
+        ] {
+            let min = row.real(min)?;
+            let max = row.real(max)?;
+            if max > 0.0 {
+                let school = names::enum_name(names::SPELL_SCHOOLS, row.int(school)?).unwrap_or_default();
+                damage.push(format!("{min}-{max} {school}"));
+            }
+        }
+        let mut resistances = Vec::new();
+        for (column, name) in [
+            ("holy_res", "HOLY"),
+            ("fire_res", "FIRE"),
+            ("nature_res", "NATURE"),
+            ("frost_res", "FROST"),
+            ("shadow_res", "SHADOW"),
+            ("arcane_res", "ARCANE"),
+        ] {
+            let value = row.int(column)?;
+            if value != 0 {
+                resistances.push(format!("{name} {value:+}"));
+            }
+        }
+        let mut spells = Vec::new();
+        for ((spell, trigger, charges, cooldown), slot) in [
+            ("spellid_1", "spelltrigger_1", "spellcharges_1", "spellcooldown_1"),
+            ("spellid_2", "spelltrigger_2", "spellcharges_2", "spellcooldown_2"),
+            ("spellid_3", "spelltrigger_3", "spellcharges_3", "spellcooldown_3"),
+            ("spellid_4", "spelltrigger_4", "spellcharges_4", "spellcooldown_4"),
+            ("spellid_5", "spelltrigger_5", "spellcharges_5", "spellcooldown_5"),
+        ]
+        .into_iter()
+        .zip(1_i64..)
+        {
+            let spell_value = row.int(spell)?;
+            if spell_value <= 0 {
+                continue;
+            }
+            let spell_id = checked_i32(spell_value, spell, row.line())?;
+            let spell = spell_value;
+            let trigger = names::enum_name(names::ITEM_SPELLTRIGGER_TYPE, row.int(trigger)?);
+            let charges = row.int(charges)?;
+            let cooldown = row.int(cooldown)?;
+            self.item_spell.execute(params![
+                id,
+                slot,
+                spell,
+                trigger,
+                (charges != 0).then_some(charges),
+                (cooldown != -1).then_some(cooldown)
+            ])?;
+            let mut text = format!("{} {spell}", trigger.as_deref().unwrap_or_default());
+            if let Some(name) = dbc.spell_names.get(&spell_id).filter(|s| !s.is_empty()) {
+                let _ = write!(text, " {name}");
+            }
+            spells.push(text);
+        }
+        let mut sockets = Vec::new();
+        for column in ["socketColor_1", "socketColor_2", "socketColor_3"] {
+            if let Some(color) =
+                names::flag_names(names::SOCKET_COLOR, checked_u32(row.int(column)?, column, row.line())?)
+            {
+                sockets.push(color);
+            }
+        }
+        let delay = checked_u32(row.int("delay")?, "delay", row.line())?;
+        self.item.execute(params![
+            id,
+            row.text("name")?,
+            names::enum_name(names::ITEM_QUALITIES, row.int("Quality")?),
+            nonzero(row, "ItemLevel")?,
+            nonzero(row, "RequiredLevel")?,
+            names::enum_name(names::ITEM_CLASS, class),
+            names::item_subclass(class, subclass),
+            if slot == 0 {
+                None
+            } else {
+                names::enum_name(names::INVENTORY_TYPE, slot)
+            },
+            if bonding == 0 {
+                None
+            } else {
+                names::enum_name(names::ITEM_BONDING_TYPE, bonding)
+            },
+            names::flag_names(names::ITEM_FLAGS, checked_u32(row.int("Flags")?, "Flags", row.line())?),
+            names::flag_names(
+                names::ITEM_FLAGS2,
+                checked_u32(row.int("FlagsExtra")?, "FlagsExtra", row.line())?
+            ),
+            (display != 0).then_some(display),
+            dbc.display_icons.get(&display_id),
+            row.text("description")?,
+            nonzero(row, "BuyPrice")?,
+            (buy_count != 0 && buy_count != 1).then_some(buy_count),
+            nonzero(row, "SellPrice")?,
+            nonzero(row, "maxcount")?,
+            (stackable != 0 && stackable != 1).then_some(stackable),
+            nonzero(row, "ContainerSlots")?,
+            if class_mask == 0 || class_mask & 0x5ff == 0x5ff {
+                None
+            } else {
+                names::flag_names(names::CLASSES, class_mask)
+            },
+            if race_mask == 0 || race_mask & 0x6ff == 0x6ff {
+                None
+            } else {
+                names::flag_names(names::RACES, race_mask)
+            },
+            nonzero(row, "RequiredSkill")?,
+            nonzero(row, "RequiredSkillRank")?,
+            nonzero(row, "requiredspell")?,
+            (faction != 0).then_some(faction),
+            if faction == 0 {
+                None
+            } else {
+                names::enum_name(names::REPUTATION_RANK, row.int("RequiredReputationRank")?)
+            },
+            joined(&stats, ", "),
+            nonzero(row, "armor")?,
+            joined(&damage, "; "),
+            (class == 2 && delay != 0).then_some(f64::from(delay) / 1000.0),
+            nonzero(row, "block")?,
+            joined(&resistances, ", "),
+            joined(&spells, "; "),
+            joined(&sockets, ", "),
+            nonzero(row, "socketBonus")?,
+            nonzero(row, "GemProperties")?,
+            nonzero(row, "itemset")?,
+            nonzero(row, "startquest")?,
+            nonzero(row, "lockid")?,
+            nonzero(row, "MaxDurability")?,
+            nonzero(row, "duration")?,
+            nonzero(row, "area")?,
+            nonzero(row, "Map")?,
+            nonzero(row, "BagFamily")?,
+            nonzero(row, "TotemCategory")?,
+            nonzero(row, "RandomProperty")?,
+            nonzero(row, "RandomSuffix")?,
+            nonzero(row, "DisenchantID")?,
+            (disenchant_skill != -1).then_some(disenchant_skill),
+            nonzero(row, "ItemLimitCategory")?,
+            nonzero(row, "PageText")?
+        ])?;
+        Ok(())
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "The item row mapping is kept together with its SQL insert"
-)]
-fn import(
-    insert: &mut Statement<'_>,
-    insert_spell: &mut Statement<'_>,
-    row: &Row<'_>,
-    dbc: &Context,
-) -> Result<(), BuildError> {
-    let id = row.int("entry")?;
-    let class = row.int("class")?;
-    let subclass = row.int("subclass")?;
-    let display = row.int("displayid")?;
-    let display_id = checked_i32(display, "displayid", row.line())?;
-    let slot = row.int("InventoryType")?;
-    let bonding = row.int("bonding")?;
-    let allowed_classes = row.int("AllowableClass")?;
-    let allowed_races = row.int("AllowableRace")?;
-    let class_mask = if allowed_classes == -1 {
-        0
-    } else {
-        checked_u32(allowed_classes, "AllowableClass", row.line())?
-    };
-    let race_mask = if allowed_races == -1 {
-        0
-    } else {
-        checked_u32(allowed_races, "AllowableRace", row.line())?
-    };
-    let faction = row.int("RequiredReputationFaction")?;
-    let buy_count = row.int("BuyCount")?;
-    let stackable = row.int("stackable")?;
-    let disenchant_skill = row.int("RequiredDisenchantSkill")?;
-    let mut stats = Vec::new();
-    for (kind, value) in [
-        ("stat_type1", "stat_value1"),
-        ("stat_type2", "stat_value2"),
-        ("stat_type3", "stat_value3"),
-        ("stat_type4", "stat_value4"),
-        ("stat_type5", "stat_value5"),
-        ("stat_type6", "stat_value6"),
-        ("stat_type7", "stat_value7"),
-        ("stat_type8", "stat_value8"),
-        ("stat_type9", "stat_value9"),
-        ("stat_type10", "stat_value10"),
-    ] {
-        let amount = row.int(value)?;
-        if amount != 0 {
-            let name = names::enum_name(names::ITEM_MOD_TYPE, row.int(kind)?).unwrap_or_default();
-            stats.push(format!("{name} {amount:+}"));
-        }
-    }
-    let mut damage = Vec::new();
-    for (min, max, school) in [
-        ("dmg_min1", "dmg_max1", "dmg_type1"),
-        ("dmg_min2", "dmg_max2", "dmg_type2"),
-    ] {
-        let min = row.real(min)?;
-        let max = row.real(max)?;
-        if max > 0.0 {
-            let school = names::enum_name(names::SPELL_SCHOOLS, row.int(school)?).unwrap_or_default();
-            damage.push(format!("{min}-{max} {school}"));
-        }
-    }
-    let mut resistances = Vec::new();
-    for (column, name) in [
-        ("holy_res", "HOLY"),
-        ("fire_res", "FIRE"),
-        ("nature_res", "NATURE"),
-        ("frost_res", "FROST"),
-        ("shadow_res", "SHADOW"),
-        ("arcane_res", "ARCANE"),
-    ] {
-        let value = row.int(column)?;
-        if value != 0 {
-            resistances.push(format!("{name} {value:+}"));
-        }
-    }
-    let mut spells = Vec::new();
-    for ((spell, trigger, charges, cooldown), slot) in [
-        ("spellid_1", "spelltrigger_1", "spellcharges_1", "spellcooldown_1"),
-        ("spellid_2", "spelltrigger_2", "spellcharges_2", "spellcooldown_2"),
-        ("spellid_3", "spelltrigger_3", "spellcharges_3", "spellcooldown_3"),
-        ("spellid_4", "spelltrigger_4", "spellcharges_4", "spellcooldown_4"),
-        ("spellid_5", "spelltrigger_5", "spellcharges_5", "spellcooldown_5"),
-    ]
-    .into_iter()
-    .zip(1_i64..)
+/// Adds client-only items absent from the dump, then renders item set pieces from the final item names.
+pub(super) fn finalize(conn: &Connection, dbc: &Context) -> Result<(), BuildError> {
     {
-        let spell_value = row.int(spell)?;
-        if spell_value <= 0 {
-            continue;
-        }
-        let spell_id = checked_i32(spell_value, spell, row.line())?;
-        let spell = spell_value;
-        let trigger = names::enum_name(names::ITEM_SPELLTRIGGER_TYPE, row.int(trigger)?);
-        let charges = row.int(charges)?;
-        let cooldown = row.int(cooldown)?;
-        insert_spell.execute(params![
-            id,
-            slot,
-            spell,
-            trigger,
-            (charges != 0).then_some(charges),
-            (cooldown != -1).then_some(cooldown)
-        ])?;
-        let mut text = format!("{} {spell}", trigger.as_deref().unwrap_or_default());
-        if let Some(name) = dbc.spell_names.get(&spell_id).filter(|s| !s.is_empty()) {
-            let _ = write!(text, " {name}");
-        }
-        spells.push(text);
-    }
-    let mut sockets = Vec::new();
-    for column in ["socketColor_1", "socketColor_2", "socketColor_3"] {
-        if let Some(color) = names::flag_names(names::SOCKET_COLOR, checked_u32(row.int(column)?, column, row.line())?)
-        {
-            sockets.push(color);
+        let mut insert =
+            conn.prepare("INSERT OR IGNORE INTO item (id, class, display_id, icon) VALUES (?1, ?2, ?3, ?4)")?;
+        for row in &dbc.items {
+            let icon = dbc.display_icons.get(&row.display_id);
+            insert.execute(params![
+                row.id,
+                names::enum_name(names::ITEM_CLASS, i64::from(row.class_id)),
+                (row.display_id != 0).then_some(row.display_id),
+                icon
+            ])?;
         }
     }
-    let delay = checked_u32(row.int("delay")?, "delay", row.line())?;
-    insert.execute(params![
-        id,
-        row.text("name")?,
-        names::enum_name(names::ITEM_QUALITIES, row.int("Quality")?),
-        nonzero(row, "ItemLevel")?,
-        nonzero(row, "RequiredLevel")?,
-        names::enum_name(names::ITEM_CLASS, class),
-        names::item_subclass(class, subclass),
-        if slot == 0 {
-            None
-        } else {
-            names::enum_name(names::INVENTORY_TYPE, slot)
-        },
-        if bonding == 0 {
-            None
-        } else {
-            names::enum_name(names::ITEM_BONDING_TYPE, bonding)
-        },
-        names::flag_names(names::ITEM_FLAGS, checked_u32(row.int("Flags")?, "Flags", row.line())?),
-        names::flag_names(
-            names::ITEM_FLAGS2,
-            checked_u32(row.int("FlagsExtra")?, "FlagsExtra", row.line())?
-        ),
-        (display != 0).then_some(display),
-        dbc.display_icons.get(&display_id),
-        row.text("description")?,
-        nonzero(row, "BuyPrice")?,
-        (buy_count != 0 && buy_count != 1).then_some(buy_count),
-        nonzero(row, "SellPrice")?,
-        nonzero(row, "maxcount")?,
-        (stackable != 0 && stackable != 1).then_some(stackable),
-        nonzero(row, "ContainerSlots")?,
-        if class_mask == 0 || class_mask & 0x5ff == 0x5ff {
-            None
-        } else {
-            names::flag_names(names::CLASSES, class_mask)
-        },
-        if race_mask == 0 || race_mask & 0x6ff == 0x6ff {
-            None
-        } else {
-            names::flag_names(names::RACES, race_mask)
-        },
-        nonzero(row, "RequiredSkill")?,
-        nonzero(row, "RequiredSkillRank")?,
-        nonzero(row, "requiredspell")?,
-        (faction != 0).then_some(faction),
-        if faction == 0 {
-            None
-        } else {
-            names::enum_name(names::REPUTATION_RANK, row.int("RequiredReputationRank")?)
-        },
-        joined(&stats, ", "),
-        nonzero(row, "armor")?,
-        joined(&damage, "; "),
-        (class == 2 && delay != 0).then_some(f64::from(delay) / 1000.0),
-        nonzero(row, "block")?,
-        joined(&resistances, ", "),
-        joined(&spells, "; "),
-        joined(&sockets, ", "),
-        nonzero(row, "socketBonus")?,
-        nonzero(row, "GemProperties")?,
-        nonzero(row, "itemset")?,
-        nonzero(row, "startquest")?,
-        nonzero(row, "lockid")?,
-        nonzero(row, "MaxDurability")?,
-        nonzero(row, "duration")?,
-        nonzero(row, "area")?,
-        nonzero(row, "Map")?,
-        nonzero(row, "BagFamily")?,
-        nonzero(row, "TotemCategory")?,
-        nonzero(row, "RandomProperty")?,
-        nonzero(row, "RandomSuffix")?,
-        nonzero(row, "DisenchantID")?,
-        (disenchant_skill != -1).then_some(disenchant_skill),
-        nonzero(row, "ItemLimitCategory")?,
-        nonzero(row, "PageText")?
-    ])?;
+    conn.execute_batch("UPDATE itemset SET items = (SELECT group_concat(piece, ', ') FROM (SELECT CAST(si.item_id AS TEXT) || CASE WHEN i.name IS NOT NULL AND i.name <> '' THEN ' ' || i.name ELSE '' END AS piece FROM itemset_item si LEFT JOIN item i ON i.id = si.item_id WHERE si.itemset_id = itemset.id ORDER BY si.slot))")?;
     Ok(())
 }

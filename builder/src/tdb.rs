@@ -1,22 +1,21 @@
 //! Import server data from the pinned `TrinityCore` world dump.
 
 use std::{
+    fmt::Write as _,
     fs::File,
     io::{self, BufReader, Read},
     path::Path,
 };
 
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
-use crate::{BuildError, dbc::Context, dump, names};
+use crate::{BuildError, dbc::Context, dump};
 
 mod creature;
 mod item;
 mod quest;
 mod relations;
-
-const HEX: &[u8; 16] = b"0123456789abcdef";
 
 pub(crate) struct Provenance {
     pub(crate) release: String,
@@ -50,8 +49,8 @@ pub(crate) fn import(conn: &Connection, path: &Path, dbc: &Context) -> Result<Pr
     wanted.extend_from_slice(item::TABLES);
     wanted.extend_from_slice(creature::TABLES);
     wanted.extend_from_slice(quest::TABLES);
-    quest::initialize(conn)?;
     wanted.extend_from_slice(relations::TABLES);
+    quest::initialize(conn)?;
     relations::initialize(conn)?;
     let mut release = None;
     {
@@ -84,24 +83,10 @@ pub(crate) fn import(conn: &Connection, path: &Path, dbc: &Context) -> Result<Pr
     }
     quest::finalize(conn)?;
     relations::finalize(conn)?;
-    {
-        let mut insert =
-            conn.prepare("INSERT OR IGNORE INTO item (id, class, display_id, icon) VALUES (?1, ?2, ?3, ?4)")?;
-        for row in &dbc.items {
-            let icon = dbc.display_icons.get(&row.display_id);
-            insert.execute(params![
-                row.id,
-                names::enum_name(names::ITEM_CLASS, i64::from(row.class_id)),
-                (row.display_id != 0).then_some(row.display_id),
-                icon
-            ])?;
-        }
-    }
-    conn.execute_batch("UPDATE itemset SET items = (SELECT group_concat(piece, ', ') FROM (SELECT CAST(si.item_id AS TEXT) || CASE WHEN i.name IS NOT NULL AND i.name <> '' THEN ' ' || i.name ELSE '' END AS piece FROM itemset_item si LEFT JOIN item i ON i.id = si.item_id WHERE si.itemset_id = itemset.id ORDER BY si.slot))")?;
+    item::finalize(conn, dbc)?;
     let mut sha256 = String::with_capacity(64);
     for byte in hash.finalize() {
-        sha256.push(char::from(HEX[usize::from(byte >> 4)]));
-        sha256.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        let _ = write!(sha256, "{byte:02x}");
     }
     Ok(Provenance { release, sha256 })
 }

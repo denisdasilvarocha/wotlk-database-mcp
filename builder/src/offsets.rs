@@ -18,22 +18,11 @@ pub(crate) fn import(conn: &Connection, dir: &Path) -> Result<String, BuildError
             message: "empty VERSION".into(),
         });
     }
-    let mut platforms = fs::read_dir(dir)
-        .map_err(|source| BuildError::Io {
-            path: dir.to_path_buf(),
-            source,
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|source| BuildError::Io {
-            path: dir.to_path_buf(),
-            source,
-        })?;
-    platforms.sort_by_key(fs::DirEntry::file_name);
     let mut count = 0;
     let mut insert = conn.prepare(
         "INSERT INTO offsets (name, domain, platform, va, rva, status, comment) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )?;
-    for platform in platforms {
+    for platform in sorted_entries(dir)? {
         let path = platform.path();
         if !platform
             .file_type()
@@ -53,18 +42,7 @@ pub(crate) fn import(conn: &Connection, dir: &Path) -> Result<String, BuildError
                 message: format!("unknown offsets platform '{platform_name}'"),
             });
         }
-        let mut files = fs::read_dir(&path)
-            .map_err(|source| BuildError::Io {
-                path: path.clone(),
-                source,
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| BuildError::Io {
-                path: path.clone(),
-                source,
-            })?;
-        files.sort_by_key(fs::DirEntry::file_name);
-        for file in files {
+        for file in sorted_entries(&path)? {
             let path = file.path();
             if path.extension().is_none_or(|ext| ext != "md") {
                 continue;
@@ -81,6 +59,20 @@ pub(crate) fn import(conn: &Connection, dir: &Path) -> Result<String, BuildError
     }
     Ok(version.to_owned())
 }
+
+fn sorted_entries(dir: &Path) -> Result<Vec<fs::DirEntry>, BuildError> {
+    let io_error = |source| BuildError::Io {
+        path: dir.to_path_buf(),
+        source,
+    };
+    let mut entries = fs::read_dir(dir)
+        .map_err(io_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(io_error)?;
+    entries.sort_by_key(fs::DirEntry::file_name);
+    Ok(entries)
+}
+
 fn import_file(insert: &mut rusqlite::Statement<'_>, path: &Path, platform_name: &str) -> Result<usize, BuildError> {
     let mut count = 0;
     let contents = fs::read_to_string(path).map_err(|source| BuildError::Io {
