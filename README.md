@@ -121,11 +121,19 @@ Run `just` to list all recipes. The main ones:
 |`just test`|Run the workspace tests and the offline Bash provisioning tests. They use fixtures, not real game data.|
 |`just doc`|Build the API docs; any rustdoc warning fails.|
 |`just deps`|Check advisories, licenses, sources, and unused dependencies.|
-|`just check`|Run every gate. CI runs this on Linux, macOS, and Windows.|
+|`just check`|Run every gate. CI runs this recipe.|
 |`just vendor-api [commit]`|Export the Lua API at the pinned commit, or move the pin to `commit`.|
 |`just vendor-offsets [dir]`|Validate the bundled offsets, or replace them from `dir`.|
 
 The Git hooks run formatting and clippy on commit, and tests, docs, and dependency checks on push.
+
+### Continuous integration
+
+CI runs on pull requests, pushes to `main`, and manual dispatches, on Linux, macOS, and Windows. Each run executes `just check` and builds the workspace with `cargo build --workspace --release --locked`. Linux also runs `actionlint` on the workflow. CI does not build the database, so it downloads no game data.
+
+To inspect a failed run, use `gh run view --log-failed` and select the run. To reproduce the gates locally, run `just check`.
+
+Required checks, one approving review, and force-push prevention need a `main` branch protection rule. The GitHub API returns 403 for that rule on this private repository because GitHub requires Pro or public visibility. The repository does not enforce these protections yet.
 
 The repository is a Cargo workspace:
 

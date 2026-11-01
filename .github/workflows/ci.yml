@@ -1,0 +1,115 @@
+# Every gate comes from the repository itself: `just check` runs prek, which
+# runs the same formatting, lint, test, doc, and dependency checks as local
+# hooks. CI adds a workflow lint and a release build on every platform.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            shell: bash
+          - os: macos-latest
+            shell: bash
+          # Native Windows build with MSYS2 UCRT64. The justfile and test
+          # scripts require the MSYS2 Bash environment, not Git Bash or WSL.
+          - os: windows-latest
+            shell: msys2 {0}
+    steps:
+      # .gitattributes checks out LF, but the Windows runner enables
+      # core.autocrlf globally; disable it before checkout so nothing converts.
+      - name: Disable Git line-ending conversion
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Tests build fixtures and never read the LFS payloads (the game
+          # database and the codex export). Fetching LFS would only add ~130 MB.
+          lfs: false
+
+      # The official actionlint 1.7.12 image, pinned by its multi-architecture
+      # index digest so the workflow check itself cannot change underneath us.
+      - name: Lint workflows
+        if: runner.os == 'Linux'
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: -color
+
+      - name: Set up MSYS2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: UCRT64
+          # Inherit the runner PATH so rustup, cargo, and installed tools stay
+          # reachable from the MSYS2 shell; MSYS2 paths are prepended.
+          path-type: inherit
+          update: false
+          install: >-
+            bsdtar
+            coreutils
+            curl
+            findutils
+            git
+            grep
+            jq
+            sed
+            unzip
+            zip
+
+      - name: Install Linux prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libarchive-tools
+
+      # Fail immediately with a clear message when an archive or checksum tool
+      # the build scripts rely on is missing, instead of deep inside a test.
+      - name: Verify prerequisites
+        run: |
+          for tool in bsdtar curl find grep jq sed unzip zip; do
+            command -v "$tool" >/dev/null || { echo "missing prerequisite: $tool" >&2; exit 1; }
+          done
+
+      # rust-toolchain.toml pins the channel and its clippy/rustfmt components.
+      - name: Set up Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Install build tools
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: just,prek,taplo,cargo-deny,cargo-shear
+          # Every tool has a checksummed prebuilt release on all three targets.
+          fallback: none
+
+      # Restore Cargo's registry/git caches and the compiled dependency
+      # artifacts. No game data or target/api checkout exists in this workflow.
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
+
+      - name: Check
+        run: just check
+
+      - name: Build release
+        run: cargo build --workspace --release --locked
