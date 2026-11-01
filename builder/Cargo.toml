@@ -1,0 +1,21 @@
+[package]
+name = "wotlk-db-builder"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+description = "Builds the wotlk-database-mcp SQLite database from TDB, DBC, offsets, and Lua API inputs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+rusqlite = { version = "0.41.1", default-features = false, features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+wow_dbc = { version = "0.3.0", features = ["wrath"] }

@@ -1,3 +1,7 @@
+[workspace]
+members = ["builder"]
+resolver = "3"
+
 [package]
 name = "wotlk-database-mcp"
 version = "0.1.0"
@@ -9,6 +13,7 @@ publish = false
 [dependencies]
 anyhow = "1.0.104"
 rmcp = { version = "3.8.0", features = ["server", "transport-io"] }
+rusqlite = { version = "0.41.1", default-features = false, features = ["bundled", "hooks", "limits"] }
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "io-std"] }
 tracing = "0.1.44"
@@ -17,15 +22,21 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 [dev-dependencies]
 rmcp = { version = "3.8.0", features = ["client"] }
 tokio = { version = "1.54.1", features = ["io-util"] }
+wotlk-db-builder = { version = "0.1.0", path = "builder" }
+wow_dbc = { version = "0.3.0", features = ["wrath"] }
+wow_world_base = { version = "0.2.0", features = ["wrath"] }
 
-[lints.rust]
+[lints]
+workspace = true
+
+[workspace.lints.rust]
 missing_debug_implementations = "warn"
 missing_docs = "warn"
 unreachable_pub = "warn"
 unsafe_code = "forbid"
 unused_qualifications = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 # Restriction lints picked individually; the group as a whole is not meant to be enabled.
 allow_attributes = "warn"

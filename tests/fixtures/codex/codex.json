@@ -1,0 +1,71 @@
+{
+  "functions": [
+    {
+      "name": "UnitHealth",
+      "description": "Returns the current health of a unit.",
+      "signature": "health = UnitHealth(\"unit\")",
+      "parameters": [{"name": "unit", "type": "string", "description": "The unit to query.", "optional": false}],
+      "returns": [{"name": "health", "type": "number", "description": "The unit's current health."}],
+      "examples": [],
+      "tags": [],
+      "category": "Unit",
+      "subcategory": "Health",
+      "protected": false,
+      "hwEvent": false,
+      "related": [],
+      "patch": "3.3.5",
+      "documentationUrl": "",
+      "memoryAddress": "0x0060D8B0"
+    }
+  ],
+  "events": [
+    {
+      "name": "PLAYER_LEVEL_UP",
+      "description": "Fires when the player gains a level.",
+      "parameters": [{"name": "level", "type": "number", "description": "The new level.", "optional": false}],
+      "category": "Player",
+      "related": [],
+      "patch": "3.3.5",
+      "documentationUrl": ""
+    }
+  ],
+  "widgets": [
+    {
+      "name": "Frame",
+      "description": "A frame in the user interface.",
+      "inherits": ["Region"],
+      "methods": [{"name": "Show", "signature": "Frame:Show() - Shows the frame", "description": "Shows the frame.", "parameters": [], "returns": []}],
+      "inheritedMethods": [],
+      "scriptHandlers": [{"name": "OnShow", "signature": "Frame:OnShow(self)", "description": "Called when the frame is shown.", "parameters": []}],
+      "category": "frame"
+    }
+  ],
+  "cvars": [
+    {"name": "autoLootDefault", "defaultValue": "0", "description": "Automatically loot by default.", "category": "Loot"}
+  ],
+  "types": [
+    {
+      "name": "unitId",
+      "description": "Identifies a unit.",
+      "values": [
+        {"name": "player", "value": "player", "description": "The player."},
+        {"name": "target", "value": "target", "description": "The current target."}
+      ],
+      "related": []
+    }
+  ],
+  "combatlog_prefixes": [
+    {"name": "SPELL", "description": "A spell combat log prefix.", "type": "prefix", "arguments": [], "bookPage": 1}
+  ],
+  "combatlog_events": [
+    {"name": "SPELL_DAMAGE", "description": "A spell dealt damage.", "type": "suffix", "prefixes": ["SPELL"], "arguments": [], "bookPage": 1}
+  ],
+  "secure_templates": [
+    {
+      "name": "SecureActionButtonTemplate",
+      "description": "A button that performs secure actions.",
+      "attributes": [{"name": "type", "values": ["spell", "item"], "description": "The action type."}],
+      "examples": []
+    }
+  ]
+}
