@@ -219,8 +219,8 @@ fn import_row(importer: &mut Importer<'_>, table: &str, row: &Row<'_>, dbc: &Con
             }
             importer.creature.execute(params![
                 row.int("entry")?,
-                nonempty(row.text("name")?),
-                nonempty(row.text("subname")?),
+                row.text("name")?,
+                row.text("subname")?,
                 nonzero(row.int("minlevel")?),
                 nonzero(row.int("maxlevel")?),
                 optional_enum(names::CREATURE_ELITE_TYPE, row.int("rank")?),
@@ -248,8 +248,8 @@ fn import_row(importer: &mut Importer<'_>, table: &str, row: &Row<'_>, dbc: &Con
                 nonempty(Some(&models)),
                 immune_mechanics(flags(row, "mechanic_immune_mask")?),
                 nonzero(row.int("VehicleId")?),
-                nonempty(row.text("AIName")?),
-                nonempty(row.text("ScriptName")?),
+                row.text("AIName")?,
+                row.text("ScriptName")?,
             ])?;
         }
         "creature_template_spell" => {
@@ -296,15 +296,15 @@ fn import_row(importer: &mut Importer<'_>, table: &str, row: &Row<'_>, dbc: &Con
             }
             importer.gameobject.execute(params![
                 row.int("entry")?,
-                nonempty(row.text("name")?),
+                row.text("name")?,
                 names::enum_name(names::GAMEOBJECT_TYPES, kind),
                 nonzero(row.int("displayId")?),
                 nondefault(row.real("size")?, 1.0),
                 loot,
                 nonempty(Some(&data)),
-                nonempty(row.text("castBarCaption")?),
-                nonempty(row.text("AIName")?),
-                nonempty(row.text("ScriptName")?)
+                row.text("castBarCaption")?,
+                row.text("AIName")?,
+                row.text("ScriptName")?
             ])?;
         }
         _ => {

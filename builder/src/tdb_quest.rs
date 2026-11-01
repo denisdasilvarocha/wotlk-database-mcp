@@ -130,9 +130,6 @@ pub(super) const TABLES: &[(&str, &[&str])] = &[
 fn nz(value: i64) -> Option<i64> {
     (value != 0).then_some(value)
 }
-fn text<'a>(row: &'a Row<'_>, column: &str) -> Result<Option<&'a str>, BuildError> {
-    Ok(row.text(column)?.filter(|s| !s.is_empty()))
-}
 fn mask_names(
     table: &[(u32, &str)],
     value: i64,
@@ -253,7 +250,7 @@ impl<'conn> Importer<'conn> {
             .and_then(|id| dbc.area_names.get(&id));
         let mut objective_texts = String::new();
         for column in ["ObjectiveText1", "ObjectiveText2", "ObjectiveText3", "ObjectiveText4"] {
-            if let Some(value) = text(row, column)? {
+            if let Some(value) = row.text(column)? {
                 if !objective_texts.is_empty() {
                     objective_texts.push_str(" | ");
                 }
@@ -262,7 +259,7 @@ impl<'conn> Importer<'conn> {
         }
         self.quest.execute(params![
             id,
-            text(row, "LogTitle")?,
+            row.text("LogTitle")?,
             nz(row.int("QuestLevel")?),
             nz(row.int("MinLevel")?),
             zone_id,
@@ -282,10 +279,10 @@ impl<'conn> Importer<'conn> {
                 names::QUEST_FLAGS,
                 checked_mask(row.int("Flags")?, "Flags", row.line())?
             ),
-            text(row, "LogDescription")?,
-            text(row, "QuestDescription")?,
-            text(row, "AreaDescription")?,
-            text(row, "QuestCompletionLog")?,
+            row.text("LogDescription")?,
+            row.text("QuestDescription")?,
+            row.text("AreaDescription")?,
+            row.text("QuestCompletionLog")?,
             (!objective_texts.is_empty()).then_some(objective_texts.as_str()),
             mask_names(
                 names::RACES,

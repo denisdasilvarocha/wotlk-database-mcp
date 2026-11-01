@@ -116,10 +116,6 @@ fn nonzero(row: &Row<'_>, column: &str) -> Result<Option<i64>, BuildError> {
     Ok((value != 0).then_some(value))
 }
 
-fn nonempty(value: Option<&str>) -> Option<&str> {
-    value.filter(|s| !s.is_empty())
-}
-
 fn joined(values: &[String], separator: &str) -> Option<String> {
     if values.is_empty() {
         None
@@ -284,7 +280,7 @@ fn import(
     let delay = checked_u32(row.int("delay")?, "delay", row.line())?;
     insert.execute(params![
         id,
-        nonempty(row.text("name")?),
+        row.text("name")?,
         names::enum_name(names::ITEM_QUALITIES, row.int("Quality")?),
         nonzero(row, "ItemLevel")?,
         nonzero(row, "RequiredLevel")?,
@@ -307,7 +303,7 @@ fn import(
         ),
         (display != 0).then_some(display),
         dbc.display_icons.get(&display_id),
-        nonempty(row.text("description")?),
+        row.text("description")?,
         nonzero(row, "BuyPrice")?,
         (buy_count != 0 && buy_count != 1).then_some(buy_count),
         nonzero(row, "SellPrice")?,

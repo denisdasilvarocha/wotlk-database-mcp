@@ -179,14 +179,13 @@ impl<R: BufRead> Lexer<R> {
                 }
                 _ => {
                     let mut bytes = vec![b];
+                    let numeric = b.is_ascii_digit() || b == b'-' || b == b'+';
                     while let Some(c) = self.peek_byte()? {
+                        // Dots belong to numeric words; elsewhere they separate identifiers.
                         if c.is_ascii_whitespace()
                             || matches!(c, b'(' | b')' | b',' | b';' | b'\'' | b'"' | b'`' | b'#')
+                            || (c == b'.' && !numeric)
                         {
-                            break;
-                        }
-                        // A decimal point belongs to a numeric literal; elsewhere it separates identifiers.
-                        if c == b'.' && !bytes[0].is_ascii_digit() && bytes[0] != b'-' && bytes[0] != b'+' {
                             break;
                         }
                         bytes.push(c);
@@ -251,16 +250,9 @@ struct Table {
     columns: Vec<String>,
 }
 
-#[derive(Debug)]
-enum Value {
-    Null,
-    Text(String),
-    Number(String),
-}
-
 pub(crate) struct Row<'a> {
     columns: &'a [String],
-    values: &'a [Value],
+    values: &'a [Option<String>],
     line: u64,
 }
 
@@ -269,7 +261,8 @@ impl Row<'_> {
         self.line
     }
 
-    fn value(&self, name: &str) -> Result<&Value, BuildError> {
+    /// Looks up a cell by name, returning `None` for SQL NULL.
+    fn value(&self, name: &str) -> Result<Option<&str>, BuildError> {
         let index = self
             .columns
             .iter()
@@ -277,19 +270,20 @@ impl Row<'_> {
             .ok_or_else(|| error(self.line, format!("missing column {name}")))?;
         self.values
             .get(index)
+            .map(Option::as_deref)
             .ok_or_else(|| error(self.line, format!("missing value for {name}")))
     }
 
-    /// Parses a numeric column: text and number cells are parsed, nulls become the numeric zero.
+    /// Parses a numeric column: quoted text and numeric words are parsed, nulls become the numeric zero.
     fn number<T>(&self, name: &str, kind: &str) -> Result<T, BuildError>
     where
         T: std::str::FromStr + Default,
     {
         match self.value(name)? {
-            Value::Number(value) | Value::Text(value) => value
+            Some(value) => value
                 .parse()
                 .map_err(|_| error(self.line, format!("invalid {kind} in {name}: {value}"))),
-            Value::Null => Ok(T::default()),
+            None => Ok(T::default()),
         }
     }
 
@@ -301,11 +295,9 @@ impl Row<'_> {
         self.number(name, "real")
     }
 
+    /// Normalizes SQL NULL and empty strings to `None`; nonempty cells stay borrowed.
     pub(crate) fn text(&self, name: &str) -> Result<Option<&str>, BuildError> {
-        match self.value(name)? {
-            Value::Null => Ok(None),
-            Value::Text(value) | Value::Number(value) => Ok((!value.is_empty()).then_some(value.as_str())),
-        }
+        Ok(self.value(name)?.filter(|value| !value.is_empty()))
     }
 }
 
@@ -350,7 +342,7 @@ fn create<R: BufRead>(
     let line = lexer.line;
     lexer.symbol(b'(')?;
     let mut columns = Vec::new();
-    loop {
+    'columns: loop {
         let (first, item_line) = lexer.next()?;
         if matches!(first, Token::Symbol(b')')) {
             break;
@@ -379,10 +371,7 @@ fn create<R: BufRead>(
             let (token, _) = lexer.next()?;
             match token {
                 Token::Symbol(b'(') => depth += 1,
-                Token::Symbol(b')') if depth == 0 => {
-                    lexer.lookahead = Some((Token::Symbol(b')'), lexer.line));
-                    break;
-                }
+                Token::Symbol(b')') if depth == 0 => break 'columns,
                 Token::Symbol(b')') => depth -= 1,
                 Token::Symbol(b',') if depth == 0 => break,
                 Token::Symbol(b';') => return Err(error(item_line, "unterminated CREATE TABLE")),
@@ -451,9 +440,9 @@ fn insert<R: BufRead, F: FnMut(&str, &Row<'_>) -> Result<(), BuildError>>(
         loop {
             let (token, line) = lexer.next()?;
             let value = match token {
-                Token::Text(value) => Value::Text(value),
-                Token::Word(value) if value.eq_ignore_ascii_case("NULL") => Value::Null,
-                Token::Word(value) if value.parse::<f64>().is_ok() => Value::Number(value),
+                Token::Text(value) => Some(value),
+                Token::Word(value) if value.eq_ignore_ascii_case("NULL") => None,
+                Token::Word(value) if value.parse::<f64>().is_ok() => Some(value),
                 _ => return Err(error(line, "invalid row value")),
             };
             row.push(value);

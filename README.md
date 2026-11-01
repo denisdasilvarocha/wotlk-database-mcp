@@ -145,6 +145,6 @@ The repository is a Cargo workspace:
 |`scripts/`|Setup, input download, and vendoring scripts called by `just`.|
 |`docs/spec/`|Feature specs.|
 
-The streaming TDB parser is in `builder/src/dump.rs`. Column lists share case-insensitive duplicate checks and separator handling. Numeric fields share conversion rules: `NULL` becomes zero, and invalid values report the field type, name, and source line.
+The streaming TDB parser is in `builder/src/dump.rs`. Column lists share case-insensitive duplicate checks and separator handling. Numeric fields share conversion rules: `NULL` becomes zero, and invalid values report the field type, name, and source line. Text fields share one normalization rule in `Row::text`: SQL `NULL` and empty strings become absent values; other scalar text stays unchanged.
 
 Read [AGENTS.md](AGENTS.md) before you change code. It has the coding rules, the definition of done, and how to add a tool.
