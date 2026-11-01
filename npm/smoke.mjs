@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, access } from 'node:fs/promises';
 import { join, resolve, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
@@ -10,7 +10,10 @@ if (!installArg || (flag && (flag !== '--db' || !database || !isAbsolute(databas
 const launcher = join(resolve(installArg), 'node_modules/wotlk-database-mcp/bin/launcher.cjs');
 await access(launcher);
 const isolated = await mkdtemp(join(tmpdir(), 'wotlk-mcp-smoke-'));
-const env = { ...process.env, HOME: isolated, USERPROFILE: isolated, XDG_CACHE_HOME: join(isolated, 'cache'), LOCALAPPDATA: join(isolated, 'local'), APPDATA: join(isolated, 'appdata') };
+// Windows resolves the cache through SHGetKnownFolderPath, which fails for a missing folder.
+const localAppData = join(isolated, 'AppData', 'Local');
+await mkdir(localAppData, { recursive: true });
+const env = { ...process.env, HOME: isolated, USERPROFILE: isolated, XDG_CACHE_HOME: join(isolated, 'cache'), LOCALAPPDATA: localAppData, APPDATA: join(isolated, 'AppData', 'Roaming') };
 delete env.WOTLK_DB;
 const child = spawn(process.execPath, [launcher, ...(database ? ['--db', database] : [])], { env, stdio: ['pipe', 'pipe', 'pipe'] });
 let stderr = '';
