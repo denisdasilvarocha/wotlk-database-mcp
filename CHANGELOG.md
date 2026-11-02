@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project has no releases yet.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Use `fetch` to download and verify the database before you connect.
 - Download the database into a schema-version cache when no explicit path is set. The handshake and tool list remain available during the download.
 - Check `meta.schema_version` when the server opens a database.
-- Prepare a server release commit and tag with `just release <version>`.
+- Preview and publish a server release with `just release <level|version>`. Add `--execute` to commit, tag, and push.
 
 ### Changed
 

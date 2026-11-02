@@ -4,7 +4,9 @@ Use this guide to publish server binaries, npm packages, and database assets. Fo
 
 ## Prerequisites
 
-Use a checkout of `main` with Git, Cargo, `just`, and an authenticated GitHub CLI. You need permission to dispatch workflows and push to the repository. Run commands from the repository root.
+Use a checkout of `main` with Git, Cargo, `just`, an authenticated GitHub CLI (`gh`), and Node.js with npm. You need permission to dispatch workflows and push to the repository. Run commands from the repository root.
+
+Run `just setup` to install the project tools, including `cargo-release`. The release preflight uses `npm view` to check package names.
 
 ## Release names
 
@@ -20,58 +22,125 @@ The server release includes binaries for five targets as GitHub Release assets. 
 | Database tag | `db-schema<N>`, where `N` is `SCHEMA_VERSION` in `src/schema_version.rs`. |
 | Database release title | `Database schema <N>`. |
 | Database assets | `wotlk-db-schema<N>.sqlite.zst` and `wotlk-db-schema<N>.sqlite.sha256`. |
-| Database workflow | `Release database` in `.github/workflows/release-database.yml`. |
+| Database workflow | `Release database` in `.github/workflows/release-database.yml`. Runs on push to `main` when `data/wotlk.sqlite` or `src/schema_version.rs` changes, or by manual dispatch. |
 | dist build hook | `.github/dist-build-setup.yml`. |
 
 The database asset name uses `wotlk-<tag>`. The checksum covers the decompressed SQLite file.
 
+## One-time setup
+
+Create the GitHub environment `release` under **Settings → Environments**. You can restrict deployments to tags matching `v*` and add required reviewers. You can also add a tag ruleset protecting `v*` and `db-schema*`.
+
 > [!IMPORTANT]
-> All six npm packages must trust the calling workflow `release.yml` in `denisdasilvarocha/wotlk-database-mcp`. Do not rename that workflow file. The workflow calls `.github/workflows/publish-npm.yml` to publish the packages.
+> All six npm packages must trust the calling workflow `release.yml` in `denisdasilvarocha/wotlk-database-mcp` and the environment `release`. Do not rename that workflow file. It calls `.github/workflows/publish-npm.yml` to publish the packages.
 
-## 1. Release the database if needed
+After 2026-11-03 06:48 UTC, run `npm login`, then create and deprecate a placeholder for each name and configure its trusted publisher:
 
-Release the database when the schema or data changes. Database assets are immutable. For new data, bump `SCHEMA_VERSION` before you publish. Follow the [database rebuild guide](rebuild-database.md) to prepare the database and merge the changes to `main`.
+```sh
+for name in wotlk-database-mcp wotlk-database-mcp-darwin-arm64 wotlk-database-mcp-darwin-x64 wotlk-database-mcp-linux-arm64 wotlk-database-mcp-linux-x64 wotlk-database-mcp-win32-x64; do
+  dir=$(mktemp -d)
+  printf '{"name":"%s","version":"0.0.1-bootstrap.0","description":"Placeholder for trusted publishing setup.","repository":{"type":"git","url":"git+https://github.com/denisdasilvarocha/wotlk-database-mcp.git"}}\n' "$name" > "$dir/package.json"
+  npm publish "$dir" --access public --tag bootstrap
+  npm deprecate "$name@0.0.1-bootstrap.0" "Placeholder. Install a real release."
+  npm trust github "$name" --repo denisdasilvarocha/wotlk-database-mcp --file release.yml --env release --allow-publish --yes
+  sleep 2
+done
+```
 
-Dispatch the workflow from `main`:
+If your npm version rejects `--env` or `--allow-publish`, configure each package's trusted publisher on npmjs.com under **Settings → Trusted Publisher** with the same repository, workflow `release.yml`, environment `release`, and permission to publish.
+
+npm may point `latest` at the placeholder until the first stable release. Until then, install a release candidate with `npx wotlk-database-mcp@next`.
+
+## 1. Release the database
+
+Follow the [database rebuild guide](rebuild-database.md) to prepare the database. Merge the database and `SCHEMA_VERSION` change to `main`. The database workflow runs automatically when either tracked file changes.
+
+Database assets are immutable. If the database is unchanged, the workflow reports `already holds this database`. If existing assets differ or are incomplete, the workflow fails. Bump `SCHEMA_VERSION` rather than replacing assets when the database changes.
+
+As a manual fallback, dispatch the workflow from `main`:
 
 ```sh
 gh workflow run release-database.yml --ref main
 ```
 
-Wait for `Release database` to succeed. It refuses to replace assets with the same names. The server build requires the database release and checksum asset first.
+Wait for `Release database` to succeed before releasing the server.
 
-## 2. Prepare the server release
+## 2. Preview the server release
 
-Pass a semantic version without the `v` prefix:
-
-```sh
-just release 1.2.3
-```
-
-Replace `1.2.3` with the version to release. For a prerelease, use a version such as `1.2.3-rc.1`.
-
-The recipe checks that the version is valid, the worktree is clean, and the current branch is `main`. It fetches and checks that local `main` equals `origin/main`. It rejects an existing local or remote tag and checks that both database assets exist in the matching GitHub Release.
-
-For a stable release, the recipe requires a nonempty `Unreleased` section. It moves those entries to a dated version section, creates an empty `Unreleased` section, and updates the changelog links. A prerelease leaves the changelog unchanged.
-
-The recipe updates the package version in `Cargo.toml`, refreshes `Cargo.lock` offline, and creates a release commit and annotated tag. It prints the push command but does not push.
-
-## 3. Push the release
-
-Push the commit and tag together. Replace the example version with the version from the previous step:
+Run a preview with a level or an explicit version:
 
 ```sh
-git push --atomic origin main v1.2.3
+just release rc
 ```
 
-The tag starts `Release`. The workflow builds the five targets, creates the GitHub Release, and publishes the npm packages. Check the workflow run and its release assets before you announce the release.
+You can use `release`, `patch`, `minor`, `major`, or an explicit version such as `0.2.0-rc.1`. These examples start from `0.1.0-rc.5`:
+
+| Level | Result |
+| --- | --- |
+| `rc` | `0.1.0-rc.6` |
+| `release` | `0.1.0` |
+| `patch` | `0.1.0` |
+| `minor` | `0.2.0` |
+
+The preflight checks these prerequisites in order:
+
+| Check | Failure message |
+| --- | --- |
+| Stable releases have a nonempty, valid `Unreleased` section. | `Unreleased section in CHANGELOG.md is empty or has invalid release markers` |
+| Both database assets exist for the current schema. | `database release db-schema<N> is incomplete; push the database to main or run: gh workflow run release-database.yml --ref main` |
+| All six npm packages exist. | `npm package <name> does not exist; do the one-time npm setup in docs/guides/release.md` |
+| CI has passed at `HEAD`. | `CI has not passed on <sha>; push it and wait for the CI workflow` |
+
+The dry run prints the version, the `CHANGELOG.md` diff for a stable release, and the commit and tag it would create. Prereleases leave the changelog unchanged. cargo-release also checks the branch, clean worktree, remote state, and tag existence.
+
+## 3. Release the server
+
+Execute the release with the same level or version used in the preview:
+
+```sh
+just release <level> --execute
+```
+
+Replace `<level>` with the selected level or version, then confirm the prompt. cargo-release creates the commit `chore(release): <version>`, tags it `v<version>`, and pushes both atomically. The tag starts `Release`, which builds the targets and publishes the GitHub Release and npm packages.
+
+Watch the workflow:
+
+```sh
+gh run watch
+```
+
+## 4. Verify the release
+
+Replace `<version>` with the released version and check the GitHub Release, npm tags, and launcher:
+
+```sh
+gh release view v<version>
+npm view wotlk-database-mcp dist-tags
+npx -y wotlk-database-mcp@<version> --help
+```
 
 ## Recover from a failed release
 
-Fix the cause on `main` before you retry. If no npm package published for this version, delete the unpublished tag locally and remotely. If the workflow created a GitHub Release, delete that release too. For a stable release, restore the entries to `Unreleased` and remove the failed version heading and link. Then run `just release` again and push the new commit and tag.
-
 > [!CAUTION]
 > npm versions cannot be republished. If any npm package published, use a new version. For a prerelease, bump the prerelease number before you run `just release` again.
+
+If `--execute` fails before the commit, restore the release files:
+
+```sh
+git restore Cargo.toml Cargo.lock CHANGELOG.md
+```
+
+If the commit or tag exists locally but the push failed, replace `<version>` with the failed version and remove the local release state. Skip the tag deletion if no local tag exists.
+
+> [!CAUTION]
+> `git reset --hard` discards local changes and commits not present on `origin/main`.
+
+```sh
+git tag -d v<version>
+git reset --hard origin/main
+```
+
+Fix the cause on `main` before you retry. If no npm package published for this version, delete the unpublished tag locally and remotely. If the workflow created a GitHub Release, delete that release too. For a stable release, restore the entries to `Unreleased` and remove the failed version heading and link. Then run `just release` again with `--execute`.
 
 Use these commands only for the failed version. Replace `1.2.3-rc.1` with its version:
 

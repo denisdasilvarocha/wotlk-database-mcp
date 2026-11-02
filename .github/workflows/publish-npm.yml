@@ -68,6 +68,7 @@ jobs:
   publish:
     needs: smoke
     runs-on: ubuntu-22.04
+    environment: release
     timeout-minutes: 15
     permissions:
       contents: read
@@ -97,8 +98,7 @@ jobs:
             linux-x64=dist-archives/wotlk-database-mcp-x86_64-unknown-linux-gnu.tar.xz \
             linux-arm64=dist-archives/wotlk-database-mcp-aarch64-unknown-linux-gnu.tar.xz \
             win32-x64=dist-archives/wotlk-database-mcp-x86_64-pc-windows-msvc.zip
-      # Configure all six npm names to trust the calling workflow release.yml,
-      # owner denisdasilvarocha, repository wotlk-database-mcp, allowing npm publish.
+      # Each of the six npm names trusts workflow release.yml, environment release, repository denisdasilvarocha/wotlk-database-mcp (see docs/guides/release.md).
       - name: Publish platform packages, then launcher
         shell: bash
         env:
