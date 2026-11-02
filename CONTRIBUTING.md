@@ -38,7 +38,7 @@ The `justfile` defines these development commands. Run `just` to list them.
 | `just vendor-offsets <src>` | Refresh the catalog from the directory `<src>`. |
 | `just vendor-api` | Export the API data at the recorded commit. |
 | `just vendor-api <commit>` | Export the API data at `<commit>` and update the recorded commit. |
-| `just release <version>` | Prepare a server release commit and tag. |
+| `just release <level\|version> [--execute]` | Check release prerequisites and preview a cargo-release release. Add `--execute` to commit, tag, and push. |
 
 Replace `<src>` with a catalog directory. Replace `<commit>` with an upstream Git revision. See the [database rebuild guide](docs/guides/rebuild-database.md) for input updates and the [release guide](docs/guides/release.md) for release steps.
 

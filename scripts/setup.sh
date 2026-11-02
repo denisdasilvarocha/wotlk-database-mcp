@@ -133,7 +133,7 @@ if ! command -v bun >/dev/null; then
       ;;
   esac
 fi
-for pair in 'prek:prek' 'taplo:taplo-cli' 'cargo-deny:cargo-deny' 'cargo-shear:cargo-shear'; do
+for pair in 'prek:prek' 'taplo:taplo-cli' 'cargo-deny:cargo-deny' 'cargo-shear:cargo-shear' 'cargo-release:cargo-release'; do
   program=${pair%%:*}
   package=${pair#*:}
   command -v "$program" >/dev/null || cargo install --locked "$package"
