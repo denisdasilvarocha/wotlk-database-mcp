@@ -1,6 +1,9 @@
 name: Release database
 
 on:
+  push:
+    branches: [main]
+    paths: [data/wotlk.sqlite, src/schema_version.rs]
   workflow_dispatch:
 
 permissions:
@@ -52,9 +55,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --json assets > release.json; then
-            if jq -e --arg compressed "$BASE.zst" --arg checksum "$BASE.sha256" '.assets[] | select(.name == $compressed or .name == $checksum)' release.json; then
-              echo "Refusing to replace database assets: binaries embed their checksum. Bump SCHEMA_VERSION instead." >&2
+          if gh release view "$TAG" --json assets --jq '.assets[].name' > assets.txt; then
+            if grep -Fxq "$BASE.zst" assets.txt && grep -Fxq "$BASE.sha256" assets.txt; then
+              gh release download "$TAG" --pattern "$BASE.sha256" --dir published
+              if cmp -s "published/$BASE.sha256" "$BASE.sha256"; then
+                echo "$TAG already holds this database; nothing to publish."
+                exit 0
+              fi
+            fi
+            if grep -Fxq -e "$BASE.zst" -e "$BASE.sha256" assets.txt; then
+              echo "::error::$TAG already has different or partial database assets. Binaries embed the checksum, so bump SCHEMA_VERSION instead of replacing them." >&2
               exit 1
             fi
           else
