@@ -63,6 +63,10 @@ build: vendor-offsets vendor-api build-db
 build-db:
     bash scripts/build_db.sh
 
+# Bump the version, update the changelog, commit, and tag. Push the tag yourself.
+release version:
+    bash scripts/release.sh {{quote(version)}}
+
 # Validate the bundled offsets, or refresh them from a directory.
 vendor-offsets src="":
     bash scripts/vendor_offsets.sh {{quote(src)}}

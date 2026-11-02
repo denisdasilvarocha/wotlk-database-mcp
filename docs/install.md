@@ -59,17 +59,17 @@ You can also set `WOTLK_DB` in the server process environment. `--db` takes prec
 If the automatic download fails, download and decompress the asset. These commands use a POSIX shell, `curl`, and `zstd`:
 
 ```sh
-curl -fL -O https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema1/wotlk-schema1.sqlite.zst
-curl -fL -O https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema1/wotlk-schema1.sqlite.sha256
-zstd -d wotlk-schema1.sqlite.zst
-sha256sum -c wotlk-schema1.sqlite.sha256
-export WOTLK_DB="$PWD/wotlk-schema1.sqlite"
+curl -fL -O https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema1/wotlk-db-schema1.sqlite.zst
+curl -fL -O https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema1/wotlk-db-schema1.sqlite.sha256
+zstd -d wotlk-db-schema1.sqlite.zst
+sha256sum -c wotlk-db-schema1.sqlite.sha256
+export WOTLK_DB="$PWD/wotlk-db-schema1.sqlite"
 npx -y wotlk-database-mcp
 ```
 
-On macOS, use `shasum -a 256 -c wotlk-schema1.sqlite.sha256` instead of `sha256sum`. The checksum covers the decompressed SQLite file. Set `WOTLK_DB` in your harness environment as well.
+On macOS, use `shasum -a 256 -c wotlk-db-schema1.sqlite.sha256` instead of `sha256sum`. The checksum covers the decompressed SQLite file. Set `WOTLK_DB` in your harness environment as well.
 
-The asset URL pattern is `https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema<N>/wotlk-schema<N>.sqlite.zst`. Replace `<N>` with the binary's schema version, currently `1`.
+The asset URL pattern is `https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema<N>/wotlk-db-schema<N>.sqlite.zst`. Replace `<N>` with the binary's schema version, currently `1`.
 
 ### Use a proxy
 

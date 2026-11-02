@@ -37,7 +37,7 @@ impl Provisioner {
     pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
-            url: format!("{RELEASE_URL}/db-schema{SCHEMA_VERSION}/wotlk-schema{SCHEMA_VERSION}.sqlite.zst"),
+            url: format!("{RELEASE_URL}/db-schema{SCHEMA_VERSION}/wotlk-db-schema{SCHEMA_VERSION}.sqlite.zst"),
             sha256: option_env!("WOTLK_DB_SHA256").map(str::to_owned),
         }
     }

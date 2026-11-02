@@ -90,7 +90,7 @@ The cache file for schema version 1 uses these locations:
 
 To use a local file, set `WOTLK_DB` or pass `--db /absolute/path/to/wotlk.sqlite`. `--db` takes precedence. Explicit paths never download a database.
 
-For a manual download, use the [release asset and decompression steps](docs/install.md#download-manually). The URL uses `db-schema<N>/wotlk-schema<N>.sqlite.zst`, with schema version `1` today. Run `zstd -d` on the asset and set `WOTLK_DB` to the decompressed file.
+For a manual download, use the [release asset and decompression steps](docs/install.md#download-manually). The URL uses `db-schema<N>/wotlk-db-schema<N>.sqlite.zst`, with schema version `1` today. Run `zstd -d` on the asset and set `WOTLK_DB` to the decompressed file.
 
 Set `HTTPS_PROXY` or `https_proxy` in the server environment if downloads require a proxy.
 

@@ -28,7 +28,7 @@ source-tarball = false
 unix-archive = ".tar.xz"
 # The archive format to use for windows builds (defaults .zip)
 windows-archive = ".zip"
-github-build-setup = "../build-setup.yml"
+github-build-setup = "../dist-build-setup.yml"
 # Publish jobs to run in CI
 publish-jobs = ["./publish-npm"]
 # Release candidates go to npm under the `next` dist-tag (see publish-npm.yml).

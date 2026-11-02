@@ -8,9 +8,12 @@
     schema=$(sed -nE 's/^pub const SCHEMA_VERSION: u32 = ([0-9]+);$/\1/p' src/schema_version.rs)
     [[ "$schema" =~ ^[0-9]+$ ]]
     checksum_dir=$(mktemp -d)
-    gh release download "db-schema${schema}" --pattern "wotlk-schema${schema}.sqlite.sha256" --dir "$checksum_dir"
-    checksum=$(cat "$checksum_dir/wotlk-schema${schema}.sqlite.sha256")
-    expected_suffix="  wotlk-schema${schema}.sqlite"
+    if ! gh release download "db-schema${schema}" --pattern "wotlk-db-schema${schema}.sqlite.sha256" --dir "$checksum_dir"; then
+      echo "::error::Database release db-schema${schema} or its checksum asset is missing. Run the Release database workflow from main first." >&2
+      exit 1
+    fi
+    checksum=$(cat "$checksum_dir/wotlk-db-schema${schema}.sqlite.sha256")
+    expected_suffix="  wotlk-db-schema${schema}.sqlite"
     hash=${checksum%% *}
     [[ "$hash" =~ ^[0-9a-f]{64}$ && "$checksum" == "$hash$expected_suffix" ]] || { echo "Invalid database checksum asset" >&2; exit 1; }
     echo "WOTLK_DB_SHA256=$hash" >> "$GITHUB_ENV"
