@@ -80,17 +80,17 @@ npx -y wotlk-database-mcp fetch
 
 You can also connect at once. The server answers the handshake and lists tools before the first download finishes. Tools return a downloading error with a percentage until the database is ready. Retry the call after the download. You do not need to restart the server.
 
-The cache file for schema version 1 uses these locations:
+The cache file for schema version 2 uses these locations:
 
 | Platform | Cache file |
 | --- | --- |
-| macOS | `~/Library/Caches/wotlk-database-mcp/schema-1/wotlk.sqlite` |
-| Linux | `$XDG_CACHE_HOME/wotlk-database-mcp/schema-1/wotlk.sqlite`, or `~/.cache/wotlk-database-mcp/schema-1/wotlk.sqlite` when unset |
-| Windows | `%LOCALAPPDATA%/wotlk-database-mcp/schema-1/wotlk.sqlite` |
+| macOS | `~/Library/Caches/wotlk-database-mcp/schema-2/wotlk.sqlite` |
+| Linux | `$XDG_CACHE_HOME/wotlk-database-mcp/schema-2/wotlk.sqlite`, or `~/.cache/wotlk-database-mcp/schema-2/wotlk.sqlite` when unset |
+| Windows | `%LOCALAPPDATA%/wotlk-database-mcp/schema-2/wotlk.sqlite` |
 
 To use a local file, set `WOTLK_DB` or pass `--db /absolute/path/to/wotlk.sqlite`. `--db` takes precedence. Explicit paths never download a database.
 
-For a manual download, use the [release asset and decompression steps](docs/install.md#download-manually). The URL uses `db-schema<N>/wotlk-db-schema<N>.sqlite.zst`, with schema version `1` today. Run `zstd -d` on the asset and set `WOTLK_DB` to the decompressed file.
+For a manual download, use the [release asset and decompression steps](docs/install.md#download-manually). The URL uses `db-schema<N>/wotlk-db-schema<N>.sqlite.zst`, with schema version `2` today. Run `zstd -d` on the asset and set `WOTLK_DB` to the decompressed file.
 
 Set `HTTPS_PROXY` or `https_proxy` in the server environment if downloads require a proxy.
 

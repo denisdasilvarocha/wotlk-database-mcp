@@ -104,7 +104,7 @@ mod tests {
     fn default_command_selects_versioned_cache() -> anyhow::Result<()> {
         assert_eq!(
             resolve_command([], None, Some(Path::new("/cache")))?,
-            Command::ServeCache(PathBuf::from("/cache/wotlk-database-mcp/schema-1/wotlk.sqlite"))
+            Command::ServeCache(PathBuf::from("/cache/wotlk-database-mcp/schema-2/wotlk.sqlite"))
         );
         Ok(())
     }
@@ -139,7 +139,7 @@ mod tests {
                 Some(OsStr::new("/environment.sqlite")),
                 Some(Path::new("/cache")),
             )?,
-            Command::Fetch(PathBuf::from("/cache/wotlk-database-mcp/schema-1/wotlk.sqlite"))
+            Command::Fetch(PathBuf::from("/cache/wotlk-database-mcp/schema-2/wotlk.sqlite"))
         );
         Ok(())
     }

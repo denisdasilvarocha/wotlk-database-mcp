@@ -34,13 +34,13 @@ The command shows progress on stderr. It verifies the download and exits with co
 
 You can also connect without this step. With an empty cache, the server answers the MCP handshake and lists its tools at once. It then downloads the database in the background. Until the database is ready, tools return a downloading error with a percentage and an instruction to retry. After the download, tools work without a restart.
 
-The server stores schema version 1 at these locations:
+The server stores schema version 2 at these locations:
 
 | Platform | Cache file |
 | --- | --- |
-| macOS | `~/Library/Caches/wotlk-database-mcp/schema-1/wotlk.sqlite` |
-| Linux | `$XDG_CACHE_HOME/wotlk-database-mcp/schema-1/wotlk.sqlite`, or `~/.cache/wotlk-database-mcp/schema-1/wotlk.sqlite` when unset |
-| Windows | `%LOCALAPPDATA%/wotlk-database-mcp/schema-1/wotlk.sqlite` |
+| macOS | `~/Library/Caches/wotlk-database-mcp/schema-2/wotlk.sqlite` |
+| Linux | `$XDG_CACHE_HOME/wotlk-database-mcp/schema-2/wotlk.sqlite`, or `~/.cache/wotlk-database-mcp/schema-2/wotlk.sqlite` when unset |
+| Windows | `%LOCALAPPDATA%/wotlk-database-mcp/schema-2/wotlk.sqlite` |
 
 ## 3. Select a local database
 
@@ -55,24 +55,24 @@ In the client configuration, append `"--db", "/absolute/path/to/wotlk.sqlite"` t
 You can also set `WOTLK_DB` in the server process environment. `--db` takes precedence over `WOTLK_DB`. Both bypass downloads. A missing explicit file causes the server to exit with an error that names the path.
 
 > [!IMPORTANT]
-> The server requires `meta.schema_version` to equal `1`. It refuses databases with a missing or different version. Rebuild with `just build-db` or download the matching database.
+> The server requires `meta.schema_version` to equal `2`. It refuses databases with a missing or different version. Rebuild with `just build-db` or download the matching database. Older servers require a matching older database.
 
 ### Download manually
 
 If the automatic download fails, download and decompress the asset. These commands use a POSIX shell, `curl`, and `zstd`:
 
 ```sh
-curl -fL -O https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema1/wotlk-db-schema1.sqlite.zst
-curl -fL -O https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema1/wotlk-db-schema1.sqlite.sha256
-zstd -d wotlk-db-schema1.sqlite.zst
-sha256sum -c wotlk-db-schema1.sqlite.sha256
-export WOTLK_DB="$PWD/wotlk-db-schema1.sqlite"
+curl -fL -O https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema2/wotlk-db-schema2.sqlite.zst
+curl -fL -O https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema2/wotlk-db-schema2.sqlite.sha256
+zstd -d wotlk-db-schema2.sqlite.zst
+sha256sum -c wotlk-db-schema2.sqlite.sha256
+export WOTLK_DB="$PWD/wotlk-db-schema2.sqlite"
 npx -y wotlk-database-mcp
 ```
 
-On macOS, use `shasum -a 256 -c wotlk-db-schema1.sqlite.sha256` instead of `sha256sum`. The checksum covers the decompressed SQLite file. Set `WOTLK_DB` in your harness environment as well.
+On macOS, use `shasum -a 256 -c wotlk-db-schema2.sqlite.sha256` instead of `sha256sum`. The checksum covers the decompressed SQLite file. Set `WOTLK_DB` in your harness environment as well.
 
-The asset URL pattern is `https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema<N>/wotlk-db-schema<N>.sqlite.zst`. Replace `<N>` with the binary's schema version, currently `1`.
+The asset URL pattern is `https://github.com/denisdasilvarocha/wotlk-database-mcp/releases/download/db-schema<N>/wotlk-db-schema<N>.sqlite.zst`. Replace `<N>` with the binary's schema version, currently `2`.
 
 ### Use a proxy
 
@@ -164,7 +164,7 @@ ok
 
 Read the server's stderr when the harness cannot connect. For download failures, check the cause and asset URL in the tool error. Run `npx -y wotlk-database-mcp fetch` to retry, or use the manual download steps above.
 
-For a missing local file, check the [database path configuration](reference/configuration.md). For a schema mismatch, rebuild or download schema version 1. For a missing source binary, run `just build` and check the client command path.
+For a missing local file, check the [database path configuration](reference/configuration.md). For a schema mismatch, rebuild or download schema version 2. For a missing source binary, run `just build` and check the client command path.
 
 ## Related pages
 

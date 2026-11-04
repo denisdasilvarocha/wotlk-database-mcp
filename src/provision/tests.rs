@@ -37,7 +37,7 @@ impl Fixture {
         let conn = rusqlite::Connection::open(&source).expect("create fixture database");
         conn.execute_batch(
             "CREATE TABLE meta(name TEXT PRIMARY KEY, value TEXT);
-             INSERT INTO meta VALUES('schema_version', '1'), ('client_build', '12340');",
+             INSERT INTO meta VALUES('schema_version', '2'), ('client_build', '12340');",
         )
         .expect("write fixture metadata");
         drop(conn);

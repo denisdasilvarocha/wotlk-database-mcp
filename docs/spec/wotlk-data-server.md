@@ -146,7 +146,7 @@ Measured TDB 335.26091 volumes, for sizing: about 317k creature loot rows, 152k 
 - `rusqlite` with the `bundled` feature (version 0.41; FTS5 is included). The database is opened read-only with `query_only` on. Queries run on `spawn_blocking`.
 - The server takes the database path from `--db`, then `WOTLK_DB`, then the schema-version cache. An explicit path never triggers a download. A missing explicit file causes an error that names the path.
 - Without a valid cache, the server answers the MCP handshake and lists tools before it downloads the database. Tools report download progress until ready. Queries need no network connection after provisioning. See the [configuration reference](../reference/configuration.md).
-- The server requires `meta.schema_version` to equal `1`. It refuses missing or different versions.
+- The server requires `meta.schema_version` to equal `2`. It refuses missing or different versions.
 - `wotlk-database-mcp fetch` downloads and verifies the database in the foreground.
 
 ### Tool contract

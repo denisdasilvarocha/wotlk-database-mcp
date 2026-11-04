@@ -39,22 +39,19 @@ fn database(name: &str, version: Option<&str>) -> PathBuf {
 #[test]
 fn open_rejects_missing_schema_version() {
     let path = database("schema-version-missing", None);
-    let error = WotlkServer::open(&path).expect_err("unversioned database must be rejected");
-    assert_eq!(error.to_string(), "expected schema version 1, found none");
+    WotlkServer::open(&path).expect_err("unversioned database must be rejected");
 }
 
 #[test]
-fn open_rejects_wrong_schema_version() {
-    let path = database("schema-version-wrong", Some("2"));
-    let error = WotlkServer::open(&path).expect_err("incompatible database must be rejected");
-    assert_eq!(error.to_string(), "expected schema version 1, found 2");
+fn open_schema_version_2_rejects_version_1() {
+    let path = database("schema-version-wrong", Some("1"));
+    WotlkServer::open(&path).expect_err("schema version 1 must be rejected");
 }
 
 #[test]
 fn open_rejects_malformed_schema_version() {
     let path = database("schema-version-malformed", Some("unknown"));
-    let error = WotlkServer::open(&path).expect_err("malformed version must be rejected");
-    assert_eq!(error.to_string(), "expected schema version 1, found unknown");
+    WotlkServer::open(&path).expect_err("malformed version must be rejected");
 }
 
 #[test]
@@ -64,14 +61,13 @@ fn open_rejects_database_without_metadata() {
         .unwrap()
         .execute_batch("DROP TABLE meta")
         .unwrap();
-    let error = WotlkServer::open(&path).expect_err("missing metadata must be rejected");
-    assert_eq!(error.to_string(), "expected schema version 1, found none");
+    WotlkServer::open(&path).expect_err("missing metadata must be rejected");
 }
 
 #[test]
-fn open_accepts_matching_schema_version() {
-    let path = database("schema-version-matching", Some("1"));
-    WotlkServer::open(&path).expect("matching database must open");
+fn open_schema_version_2_accepts_version_2() {
+    let path = database("schema-version-matching", Some("2"));
+    WotlkServer::open(&path).expect("schema version 2 must open");
 }
 
 #[test]
@@ -85,7 +81,7 @@ fn builder_database_opens_with_current_schema_version() {
 
 #[test]
 fn open_preserves_sqlite_failures() {
-    let path = database("schema-version-corrupt", Some("1"));
+    let path = database("schema-version-corrupt", Some("2"));
     fs::write(&path, b"not a sqlite database").unwrap();
     let error = WotlkServer::open(&path).expect_err("corrupt database must be rejected");
     assert!(

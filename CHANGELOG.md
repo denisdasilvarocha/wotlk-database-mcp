@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 > [!WARNING]
-> **BREAKING**: Source builds no longer use the checkout database by default. Pass `--db <path>` or set `WOTLK_DB`. See [local database setup](docs/install.md#3-select-a-local-database).
+> **BREAKING**: Source builds no longer use the checkout database by default. Pass `--db <path>` or set `WOTLK_DB`. The server requires schema version 2. Rebuild or download a matching database; a downgrade requires a database matching the older server. See [local database setup](docs/install.md#3-select-a-local-database).
 
 ### Added
 
@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **BREAKING**: Databases without `meta.schema_version` equal to `1` are refused. Rebuild with `just build-db` or download the matching database.
+- **BREAKING**: Databases without `meta.schema_version` equal to `2` are refused. Rebuild with `just build-db` or download the matching database. Older servers require a matching older database.
 - **BREAKING**: Database assets now use `wotlk-db-schema<N>.sqlite.zst` and `wotlk-db-schema<N>.sqlite.sha256`. Servers built before this change cannot download the database.
 - Database releases now use the title `Database schema <N>`.
 - Start database downloads in the background at startup. The handshake and tool list do not wait for the download.

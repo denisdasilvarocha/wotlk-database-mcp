@@ -30,7 +30,7 @@ flowchart TD
   env -->|No| cache["Use schema-version cache"]
 ```
 
-The cache path ends with `wotlk-database-mcp/schema-1/wotlk.sqlite` under the platform cache directory. See [cache locations](../install.md#2-download-the-database) for each OS. The server does not use a path from the source checkout unless you select it explicitly.
+The cache path ends with `wotlk-database-mcp/schema-2/wotlk.sqlite` under the platform cache directory. See [cache locations](../install.md#2-download-the-database) for each OS. The server does not use a path from the source checkout unless you select it explicitly.
 
 ## Runtime settings
 
@@ -58,7 +58,7 @@ usage: wotlk-database-mcp [--db <path>] | wotlk-database-mcp fetch
 
 Relative paths resolve from the server process's working directory. An empty `WOTLK_DB` counts as a selected value and fails the file check.
 
-The server opens the database read-only. It requires `meta.schema_version` to equal `1`, including for explicit paths. A missing version produces `expected schema version 1, found none`. A different version produces `expected schema version 1, found <x>`, where `<x>` is the stored value.
+The server opens the database read-only. It requires `meta.schema_version` to equal `2`, including for explicit paths. A missing version produces `expected schema version 2, found none`. A different version produces `expected schema version 2, found <x>`, where `<x>` is the stored value.
 
 With no valid cache, the server answers the handshake and lists tools before it downloads the database. During the download, tool errors give a percentage and tell the caller to retry. After the database is ready, tools work without a restart.
 
@@ -69,7 +69,7 @@ If download or verification fails, tool errors include the cause, asset URL, `np
 | `usage: wotlk-database-mcp [--db <path>] \| wotlk-database-mcp fetch` | Supply no arguments, `--db` with one path, or `fetch`. |
 | `database file not found: PATH (pass --db <path> or set WOTLK_DB)` | Select an existing database file. See [Installation](../install.md). |
 | `cannot open database PATH` | Check file access and the SQLite error. Use a database that contains build metadata. |
-| `expected schema version 1, found ...` | Run `just build-db` or download schema version 1. |
+| `expected schema version 2, found ...` | Run `just build-db` or download schema version 2. |
 
 ## Logging
 
