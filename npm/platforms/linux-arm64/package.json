@@ -18,6 +18,11 @@
         "glibc"
     ],
     "preferUnplugged": true,
+    "publishConfig": {
+        "executableFiles": [
+            "bin/wotlk-database-mcp"
+        ]
+    },
     "files": [
         "bin/"
     ]

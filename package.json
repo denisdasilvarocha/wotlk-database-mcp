@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
-  "packageManager": "pnpm@12.16.1",
+  "packageManager": "pnpm@10.34.9",
   "scripts": {
     "version": "changeset version && node npm/sync-version.mjs && pnpm install --lockfile-only --ignore-scripts"
   },

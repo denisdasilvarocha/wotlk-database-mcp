@@ -7,7 +7,7 @@ Use this guide to publish the six npm packages and the matching database assets.
 Run release commands from the repository root in Bash.
 
 - Use a checkout of `main` and an authenticated GitHub CLI (`gh`).
-- Use Node.js 24 and pnpm 12.16.1. The root `package.json` pins pnpm.
+- Use Node.js 24 and pnpm 10.34.9. The root `package.json` pins pnpm.
 - Install the workspace tools without running package scripts:
 
   ```sh

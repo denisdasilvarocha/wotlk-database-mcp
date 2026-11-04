@@ -4,7 +4,7 @@ Use this workflow to change the server, the builder, or the documentation. The s
 
 ## Set up development
 
-Install the [platform prerequisites and `just`](docs/install.md#install-prerequisites) before setup. Use Node.js 24 and pnpm 12.16.1. From the repository root, run:
+Install the [platform prerequisites and `just`](docs/install.md#install-prerequisites) before setup. Use Node.js 24 and pnpm 10.34.9. From the repository root, run:
 
 ```sh
 just setup

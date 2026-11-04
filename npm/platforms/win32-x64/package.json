@@ -15,6 +15,11 @@
         "x64"
     ],
     "preferUnplugged": true,
+    "publishConfig": {
+        "executableFiles": [
+            "bin/wotlk-database-mcp.exe"
+        ]
+    },
     "files": [
         "bin/"
     ]
