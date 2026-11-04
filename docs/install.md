@@ -1,6 +1,9 @@
 # Install for an MCP harness
 
-Connect the server to your MCP harness over stdio. You need Node.js with npm and `npx` on your PATH. You do not need Rust for the npm package.
+Connect the server to your MCP harness over stdio. Use Node.js 22 or later with npm and `npx` on your PATH.
+Keep npm optional dependencies enabled so it installs the native package for your platform. You do not need Rust for the npm package.
+
+The project code and packaged binaries use the MIT License. Third-party game data retains its own rights. See the [MIT License](../LICENSE).
 
 ## 1. Register the server
 

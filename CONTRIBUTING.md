@@ -4,13 +4,15 @@ Use this workflow to change the server, the builder, or the documentation. The s
 
 ## Set up development
 
-Install the [platform prerequisites and `just`](docs/install.md#install-prerequisites) before setup. From the repository root, run:
+Install the [platform prerequisites and `just`](docs/install.md#install-prerequisites) before setup. Use Node.js 24 and pnpm 12.16.1. From the repository root, run:
 
 ```sh
 just setup
+pnpm install --frozen-lockfile --ignore-scripts
 ```
 
 Setup installs missing tools and the selected Rust toolchain. It configures Git LFS and installs the `prek` commit and push hooks.
+The pnpm command installs workspace dependencies and the Changesets CLI without running package scripts.
 
 For a local database and release binary, follow the [installation guide](docs/install.md). Tests build fixtures and do not require the full game database.
 
@@ -38,9 +40,8 @@ The `justfile` defines these development commands. Run `just` to list them.
 | `just vendor-offsets <src>` | Refresh the catalog from the directory `<src>`. |
 | `just vendor-api` | Export the API data at the recorded commit. |
 | `just vendor-api <commit>` | Export the API data at `<commit>` and update the recorded commit. |
-| `just release <level\|version> [--execute]` | Check release prerequisites and preview a cargo-release release. Add `--execute` to commit, tag, and push. |
 
-Replace `<src>` with a catalog directory. Replace `<commit>` with an upstream Git revision. See the [database rebuild guide](docs/guides/rebuild-database.md) for input updates and the [release guide](docs/guides/release.md) for release steps.
+Replace `<src>` with a catalog directory. Replace `<commit>` with an upstream Git revision. See the [database rebuild guide](docs/guides/rebuild-database.md) for input updates and the [release guide](docs/guides/release.md) for Changesets releases.
 
 ## Follow the code conventions
 
@@ -95,15 +96,16 @@ The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches
 | --- | --- | --- |
 | `ubuntu-latest` | Bash. | `just check`, workflow lint, npm packaging tests, and npm smoke. |
 | `macos-latest` | Bash. | `just test`, npm packaging tests, and npm smoke. |
-| `windows-latest` | MSYS2 UCRT64. | `just test` and npm smoke. |
+| `windows-latest` | MSYS2 UCRT64. | `just test`, npm packaging tests, and npm smoke. |
 
-Each npm smoke check packs the debug binary built by the tests. It installs the packages without scripts and lists the MCP tools through the launcher. CI does not build release binaries.
+Each npm smoke check stages the debug binary built by tests. It packs the launcher and host platform package with pnpm, then installs both without scripts.
+The check starts the launcher through `npx` in an isolated cache. It sends MCP `initialize` and `tools/list` requests and checks that the response includes `search`.
 
 Only Linux runs clippy, so CI does not lint Windows-only code. New pushes cancel older CI runs for the same pull request.
 
 The Linux job runs the pinned `actionlint` container. CI skips Git LFS payload downloads. Tests use fixtures instead of the full database.
 
-With GitHub CLI access to this private repository, inspect the failed run:
+With GitHub CLI access to the repository, inspect the failed run:
 
 ```sh
 gh run view --log-failed
@@ -115,6 +117,8 @@ Use the failed job and step names to select the corresponding local recipe.
 
 Keep documentation with the behavior it describes. Update the applicable guide or reference page when you change a command, setting, tool, or data rule.
 
-Add a user-visible change to the `Unreleased` section of [CHANGELOG.md](CHANGELOG.md). Keep facts in one page and link to that page from other documentation. Use the [documentation index](docs/index.md) to find each page’s purpose.
+Add a Changesets file for each user-visible npm package change. Run `pnpm exec changeset` from the repository root.
+Choose the release level and write a user-facing summary. The version workflow generates changelogs for all six packages.
+Keep the root [CHANGELOG.md](CHANGELOG.md) as project history. Do not replace it with generated package changelogs.
 
 In your pull request, describe the behavior change and report the checks you ran. State any checks that you did not run.
