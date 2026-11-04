@@ -1,0 +1,14 @@
+{
+  "baseBranch": "main",
+  "access": "public",
+  "fixed": [
+    [
+      "wotlk-database-mcp",
+      "wotlk-database-mcp-darwin-arm64",
+      "wotlk-database-mcp-darwin-x64",
+      "wotlk-database-mcp-linux-x64",
+      "wotlk-database-mcp-linux-arm64",
+      "wotlk-database-mcp-win32-x64"
+    ]
+  ]
+}

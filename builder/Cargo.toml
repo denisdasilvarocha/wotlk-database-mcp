@@ -19,9 +19,3 @@ thiserror = "2.0.21"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 wow_dbc = { version = "0.3.0", features = ["wrath"] }
-
-[package.metadata.dist]
-dist = false
-
-[package.metadata.release]
-release = false

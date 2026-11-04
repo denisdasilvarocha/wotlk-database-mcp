@@ -1,0 +1,21 @@
+{
+    "name": "wotlk-database-mcp-win32-x64",
+    "version": "0.0.0",
+    "description": "Native Windows x64 binary for wotlk-database-mcp",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/denisdasilvarocha/wotlk-database-mcp.git",
+        "directory": "npm/platforms/win32-x64"
+    },
+    "os": [
+        "win32"
+    ],
+    "cpu": [
+        "x64"
+    ],
+    "preferUnplugged": true,
+    "files": [
+        "bin/"
+    ]
+}

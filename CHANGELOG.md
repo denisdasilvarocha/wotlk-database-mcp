@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Use `fetch` to download and verify the database before you connect.
 - Download the database into a schema-version cache when no explicit path is set. The handshake and tool list remain available during the download.
 - Check `meta.schema_version` when the server opens a database.
-- Preview and publish a server release with `just release <level|version>`. Add `--execute` to commit, tag, and push.
+- Install the server from npm without an install script. npm installs the matching native binary as an optional platform package.
 
 ### Changed
 

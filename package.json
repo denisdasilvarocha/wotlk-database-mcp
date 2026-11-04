@@ -1,0 +1,13 @@
+{
+  "name": "wotlk-database-mcp-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@12.16.1",
+  "scripts": {
+    "version": "changeset version && node npm/sync-version.mjs && pnpm install --lockfile-only --ignore-scripts"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3"
+  }
+}

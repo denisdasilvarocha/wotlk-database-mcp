@@ -5,6 +5,7 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches: [main]
@@ -122,25 +123,31 @@ jobs:
 
       - name: Check
         run: just ${{ matrix.recipe }}
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          node-version: '24'
+          run_install: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
           package-manager-cache: false
-      # The test files write POSIX shell scripts as fake binaries.
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Test npm packaging
-        if: runner.os != 'Windows'
         shell: bash
         run: node --test npm/*.test.mjs
       # `cargo test` already built target/debug for the CLI integration tests.
-      # `0.0.0-ci` is never published, so --offline skips the other platform packages.
       - name: Pack, install without scripts, and list MCP tools
         shell: bash
         run: |
+          set -euo pipefail
           platform=$(node -p 'process.platform + "-" + process.arch')
           binary=target/debug/wotlk-database-mcp
           if [[ $RUNNER_OS == Windows ]]; then binary+=.exe; fi
-          node npm/build.mjs 0.0.0-ci packed "$platform=$binary"
-          mkdir -p "$RUNNER_TEMP/npm-smoke"
-          npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund --offline "$PWD"/packed/*.tgz
+          node npm/build.mjs "$platform=$binary"
+          mkdir -p "$RUNNER_TEMP/npm-packed" "$RUNNER_TEMP/npm-smoke"
+          printf '{"private":true}\n' > "$RUNNER_TEMP/npm-smoke/package.json"
+          pnpm --filter wotlk-database-mcp pack --pack-destination "$RUNNER_TEMP/npm-packed"
+          pnpm --filter "wotlk-database-mcp-$platform" pack --pack-destination "$RUNNER_TEMP/npm-packed"
+          npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund --offline "$RUNNER_TEMP"/npm-packed/*.tgz
           node npm/smoke.mjs "$RUNNER_TEMP/npm-smoke"
