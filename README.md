@@ -1,65 +1,159 @@
-<div align="center">
+![WOTLK Database MCP: Give AI agents access to WotLK 3.3.5 game data, WoW Lua API, and client offsets.](docs/assets/banner.png)
 
-# wotlk-database-mcp
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#prerequisites">Prerequisites</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#development">Development</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="#license">License</a>
+</p>
 
-**Give your AI agent offline access to World of Warcraft 3.3.5a data.**
+<p align="center">
+  <a href="https://registry.npmjs.org/wotlk-database-mcp"><img src="https://img.shields.io/npm/v/wotlk-database-mcp" alt="npm version"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/built%20with-Rust-orange?logo=rust" alt="Built with Rust"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/npm/l/wotlk-database-mcp" alt="License: MIT"></a>
+</p>
 
-[Features](#features) · [For agents](#for-agents) · [Install](#install) · [Quick start](#quick-start) · [Docs](docs/index.md)
-
-</div>
-
-Look up game records, the Lua API, and native client offsets without web searches. This Model Context Protocol (MCP) server gives AI agents local reference data for original WotLK, client build 12340.
-
-## How it works
-
-Your MCP client calls the server over stdio, and the server reads a local SQLite database.
-
-```mermaid
-flowchart LR
-  accTitle: Local game data queries
-  accDescr: An MCP client sends tool calls over stdio to the server, which reads the local SQLite database and returns results.
-  client["MCP client"] -->|Tool calls over stdio| server["wotlk-database-mcp"]
-  server -->|Read queries| database[("Local SQLite database")]
-  database -->|Records| server
-  server -->|Tool results| client
-```
+WotLK Database MCP is an [MCP](https://modelcontextprotocol.io/) server for World of Warcraft: Wrath of the Lich King 3.3.5a (client build 12340). It gives MCP clients access to game records, their relationships, Lua and addon API data, and client offsets through a read-only SQLite database.
 
 ## Features
 
-Use the server to find records and follow their links.
+- Search and retrieve items, item sets, creatures, spells, quests, game objects, maps, areas, factions, talents, skills, glyphs, and achievements.
+- Inspect record details such as item stats, spell effects, and quest objectives.
+- Find loot and drop chances, vendors and prices, trainers, creature and game-object spawns, quest chains and rewards, spell ranks, and achievement criteria.
+- Look up Lua functions and signatures, events and their parameters, widgets, CVars, Lua types, combat-log events, and secure templates.
+- Inspect Windows x86 addresses, verification status, and comments for build 12340. Only offsets marked `verified` are confirmed; check the comments for caveats.
+- Run read-only SQL queries, including queries against tables not exposed as record types.
 
-- **Query offline.** Queries need no network connection after the database download.
-- **Find game data.** Search items, spells, creatures, quests, and other game records by name.
-- **Follow relationships.** Find loot sources, vendors, trainers, quest chains, and spell ranks.
-- **Check client interfaces.** Look up Lua API records and Windows x86 offsets with verification status.
-- **Read without changes.** Use `search`, `get`, `related`, or read-only `sql` queries.
+The database combines client DBC data, TrinityCore world data, and vendored Lua API and offset catalogs. It is a snapshot, so data on a customized server may differ. Call `get` with `{"kind": "meta"}` to inspect the database's provenance.
 
-## Supported platforms
+## Prerequisites
 
-The npm package supports these platforms without Rust or an install script.
-
-| Platform | Architectures |
-| --- | --- |
-| macOS | ARM64 and x86_64 |
-| Linux | x86_64 and ARM64 (GNU targets) |
-| Windows | x86_64 |
-
-## For agents
-
-Paste this prompt into your AI agent to register the server.
-
-```text
-Install the wotlk-database MCP server for this harness. Follow:
-https://github.com/denisdasilvarocha/wotlk-database-mcp/blob/main/docs/install.md
-Use the npx configuration. Keep the existing MCP servers. Run the verification
-step and report the result.
-```
+- An MCP client that supports [stdio transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#stdio).
+- Node 22 or later. Native packages support macOS and Linux, Windows.
 
 ## Install
 
-Install Node.js with npm and `npx`. Add this entry to your MCP client configuration. Keep your existing MCP servers.
+Run the command for your client in a terminal.
 
-```json
+<details>
+<summary>Codex</summary>
+
+```bash
+codex mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp).
+
+</details>
+
+<details>
+<summary>Claude Code</summary>
+
+```bash
+claude mcp add --transport stdio --scope user wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
+
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+The Cursor CLI shares its MCP configuration with the editor:
+
+```bash
+agent mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[Cursor MCP documentation](https://cursor.com/docs/integrations/xcode).
+
+</details>
+
+<details>
+<summary>Hermes Agent</summary>
+
+```bash
+hermes mcp add wotlk-database --command npx --args -y wotlk-database-mcp
+```
+
+Follow the prompts to select the tools and save the server.
+
+[Hermes Agent MCP documentation](https://hermes-agent.nousresearch.com/docs/reference/cli-commands#hermes-mcp).
+
+</details>
+
+<details>
+<summary>OpenClaw</summary>
+
+```bash
+openclaw mcp add wotlk-database --command npx --arg -y --arg wotlk-database-mcp
+```
+
+[OpenClaw MCP documentation](https://docs.openclaw.ai/cli/mcp/registry).
+
+</details>
+
+<details>
+<summary>OpenCode</summary>
+
+In OpenCode v2, run this from your project:
+
+```bash
+opencode mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+Add `--global` before `--` to make the server available in every project. For OpenCode v1, run `opencode mcp add` and follow the prompts for a local server named `wotlk-database` with the command `npx -y wotlk-database-mcp`.
+
+[OpenCode MCP documentation](https://dev.opencode.ai/v2/docs/mcp-servers/).
+
+</details>
+
+<details>
+<summary>Pi</summary>
+
+Pi 0.99.0 or later includes MCP support:
+
+```bash
+pi mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[Pi MCP documentation](https://pi.dev/docs/latest/mcp).
+
+</details>
+
+<details>
+<summary>Oh My Pi (OMP)</summary>
+
+Start `omp`, then run `/mcp add` in the session. In the setup wizard, use the name `wotlk-database`, choose stdio, enter `npx` as the command and `-y wotlk-database-mcp` as the arguments, and select your preferred scope.
+
+[Oh My Pi (OMP) MCP documentation](https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md).
+
+</details>
+
+<details>
+<summary>GitHub Copilot CLI</summary>
+
+```bash
+copilot mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[GitHub Copilot CLI MCP documentation](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers).
+
+</details>
+
+<details>
+<summary>Other</summary>
+
+Give your agent this prompt to configure the server for its MCP client:
+
+```text
+Install and configure the WotLK Database MCP server for this agent. Preserve my
+existing MCP servers and adapt this stdio configuration to the client's format:
+
 {
   "mcpServers": {
     "wotlk-database": {
@@ -68,83 +162,74 @@ Install Node.js with npm and `npx`. Add this entry to your MCP client configurat
     }
   }
 }
+
+Reload the MCP configuration if needed, then verify the server connects and
+list its available tools.
 ```
 
-## Quick start
+</details>
 
-To download and verify the database before you connect, run:
+> [!NOTE]
+> Restart or reconnect the client, then ask it to search the WotLK database for an item or spell. On the first run, the server downloads and verifies the database in the background and stores it in a versioned platform cache. If a tool reports download progress, retry after the download finishes.
 
-```sh
+To prepare the cache before connecting, run:
+
+```bash
 npx -y wotlk-database-mcp fetch
 ```
 
-You can also connect at once. The server answers the handshake and lists tools before the first download finishes. Tools return a downloading error with a percentage until the database is ready. Retry the call after the download. You do not need to restart the server.
+For a local database, pass `--db /path/to/wotlk.sqlite` after the package name, or set `WOTLK_DB` in the server's environment. See [installation and configuration](docs/install.md) for details and source builds.
 
-The cache file for schema version 2 uses these locations:
+## Usage
 
-| Platform | Cache file |
-| --- | --- |
-| macOS | `~/Library/Caches/wotlk-database-mcp/schema-2/wotlk.sqlite` |
-| Linux | `$XDG_CACHE_HOME/wotlk-database-mcp/schema-2/wotlk.sqlite`, or `~/.cache/wotlk-database-mcp/schema-2/wotlk.sqlite` when unset |
-| Windows | `%LOCALAPPDATA%/wotlk-database-mcp/schema-2/wotlk.sqlite` |
+| Tool      | Purpose                                                    |
+| --------- | ---------------------------------------------------------- |
+| `search`  | Find records by name, optionally filtered by kind.         |
+| `get`     | Retrieve a record and optionally select additional fields. |
+| `related` | Follow a supported relationship from a record.             |
+| `sql`     | Run one read-only SQLite statement.                        |
 
-To use a local file, set `WOTLK_DB` or pass `--db /absolute/path/to/wotlk.sqlite`. `--db` takes precedence. Explicit paths never download a database.
-
-For a manual download, use the [release asset and decompression steps](docs/install.md#download-manually). The URL uses `db-schema<N>/wotlk-db-schema<N>.sqlite.zst`, with schema version `2` today. Run `zstd -d` on the asset and set `WOTLK_DB` to the decompressed file.
-
-Set `HTTPS_PROXY` or `https_proxy` in the server environment if downloads require a proxy.
-
-Reconnect the client, then call the `sql` tool with these arguments:
+To find Frostbolt, call `search` with:
 
 ```json
-{"query": "SELECT 1 AS ok"}
+{ "text": "Frostbolt", "kind": "spell" }
 ```
 
-The tool returns a header and one row:
+Then call `related` with a spell ID from the results to list its ranks:
 
-```text
-ok
-1
+```json
+{ "kind": "spell", "id": 116, "relation": "ranks" }
 ```
 
-For registration steps and connection errors, see [Install the server](docs/install.md).
+Your MCP client can use these tools to answer questions such as:
 
-## Documentation
+- What are the stats for Thunderfury, Blessed Blade of the Windseeker?
+- Where does Ragnaros spawn, and what loot can it drop?
+- What are the rewards and follow-up quests for The Missing Diplomat?
+- What is the spell ID for Frostbolt rank 3?
+- What does `UnitHealth` return?
+- What is the offset for `FrameScript::Execute`?
 
-Choose a page for your task.
-
-- [Documentation index](docs/index.md)
-- [Install the server](docs/install.md)
-- [Tools reference](docs/reference/tools.md)
-- [Configuration reference](docs/reference/configuration.md)
-- [Rebuild the database](docs/guides/rebuild-database.md)
-- [Architecture](docs/architecture.md)
-- [Changelog](CHANGELOG.md)
+See the [tool reference](docs/tools.md) for parameters, examples, relationships, and data conventions.
 
 ## Development
 
-The project requires Rust 1.99 or later. Follow the [source build steps](docs/install.md#5-build-from-source), then run:
+The Rust workspace contains the server and the database builder. Install [just](https://just.systems/), then run `just setup` to install missing development tools and hooks. The setup script supports macOS, Linux with apt, dnf or pacman, and Windows through MSYS2 UCRT64. It may install system packages and Rust tools.
 
-```sh
+```bash
+just setup
+just build
 just run
 ```
 
-`just run` passes `--db data/wotlk.sqlite`. You can also run:
+`just build` prepares the pinned inputs, builds `data/wotlk.sqlite`, and compiles the release server. `just run` starts the server with that database on stdio. Run `just test` for tests or `just check` for all project gates. See the [development guide](docs/development.md) for prerequisites and individual commands.
 
-```sh
-cargo run -- --db data/wotlk.sqlite
-```
+### Documentation
 
-Run the tests:
+- [Installation and configuration](docs/install.md)
+- [Tool reference](docs/tools.md)
+- [Development guide](docs/development.md)
 
-```sh
-just test
-```
+## License
 
-## Contributing
-
-Read [Contributing](CONTRIBUTING.md) for setup, conventions, and checks.
-
-## Community
-
-Use [Issues](https://github.com/denisdasilvarocha/wotlk-database-mcp/issues) to report bugs or ask questions.
+MIT. See [LICENSE](LICENSE).

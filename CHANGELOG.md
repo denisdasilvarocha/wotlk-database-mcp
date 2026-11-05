@@ -1,13 +1,11 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
-
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
 > [!WARNING]
-> **BREAKING**: Source builds no longer use the checkout database by default. Pass `--db <path>` or set `WOTLK_DB`. The server requires schema version 2. Rebuild or download a matching database; a downgrade requires a database matching the older server. See [local database setup](docs/install.md#3-select-a-local-database).
+> **BREAKING**: Source builds no longer use the checkout database by default. Pass `--db <path>` or set `WOTLK_DB`. The server requires schema version 2. Rebuild or download a matching database; a downgrade requires a database matching the older server. See [local database setup](docs/install.md#select-a-database).
 
 ### Added
 
