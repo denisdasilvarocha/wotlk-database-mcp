@@ -90,13 +90,13 @@ The line-ending hook uses `--fix=lf`. Local recipe hooks always run across the w
 
 ## Inspect CI failures
 
-The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatches. It uses one job per runner:
+The `CI` workflow runs directly on pull requests and manual dispatches. On pushes to `main`, the `Release` workflow calls the same CI checks once.
 
 | Runner | Shell | Checks |
 | --- | --- | --- |
-| `ubuntu-latest` | Bash. | `just check`, workflow lint, npm packaging tests, and npm smoke. |
-| `macos-latest` | Bash. | `just test`, npm packaging tests, and npm smoke. |
-| `windows-latest` | MSYS2 UCRT64. | `just test`, npm packaging tests, and npm smoke. |
+| `ubuntu-24.04` | Bash. | `just check`, workflow lint, npm packaging tests, and npm smoke. |
+| `macos-15` | Bash. | `just test`, npm packaging tests, and npm smoke. |
+| `windows-2022` | MSYS2 UCRT64. | `just test`, npm packaging tests, and npm smoke. |
 
 Each npm smoke check stages the debug binary built by tests. It packs the launcher and host platform package with pnpm, then installs both without scripts.
 The check starts the launcher through `npx` in an isolated cache. It sends MCP `initialize` and `tools/list` requests and checks that the response includes `search`.

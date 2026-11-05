@@ -22,15 +22,18 @@ Release binaries embed the checksum from the immutable database release for thei
 
 The database release must match `SCHEMA_VERSION` in `src/schema_version.rs`. Its tag is `db-schemaN`.
 The release must contain `wotlk-db-schemaN.sqlite.zst` and `wotlk-db-schemaN.sqlite.sha256`. Here, `N` is the schema number.
-The checksum covers the decompressed SQLite file. The database workflow runs on `main` when `data/wotlk.sqlite` or `src/schema_version.rs` changes.
+The checksum covers the decompressed SQLite file. After the `Release` workflow verifies a push to `main`, it checks database readiness in parallel with Changesets preparation.
+Native builds wait for database readiness. This check runs even when no npm release is pending.
 
-If the assets are missing, dispatch the database workflow from `main`:
+The workflow skips publication when both assets match the tracked database. If the release is absent or has neither expected asset, it publishes them.
+Dispatch the database workflow from `main` only for repair or bootstrap:
 
 ```sh
 gh workflow run release-database.yml --ref main
 ```
 
-Wait for the `Release database` workflow to succeed before publishing npm packages. Database tags and assets are immutable. If the workflow finds partial or different assets, increase `SCHEMA_VERSION` and publish a new schema. Do not replace existing assets.
+Wait for the `Release database` workflow to succeed. Database tags and assets are immutable.
+If the workflow finds one expected asset, a malformed checksum, or a different checksum, increase `SCHEMA_VERSION` and publish a new schema. Do not replace existing assets.
 
 ## Prepare a release
 
@@ -61,12 +64,13 @@ See the [Changesets CLI guide](https://changesets.dev/guide/cli) for command det
 
 ### Merge the version pull request
 
-When a changeset reaches `main`, the `Release` workflow opens or updates a version pull request.
+When a changeset reaches `main`, the `Release` workflow opens or updates a version pull request after the CI checks pass.
+If GitHub marks the bot-created or updated checks as approval-required, a repository writer must select **Approve workflows to run**.
+Review the checks, all six package versions, and their generated changelog entries. The version script also synchronizes the Cargo version and lockfile.
+Merge the version pull request to start the release workflow.
 
-Review all six package versions and their generated changelog entries. The version script also synchronizes the Cargo version and lockfile.
-Merge the version pull request to start the publish workflow.
-
-The publish workflow runs the repository's CI checks and smoke-tests binaries for all five platforms. It packs the packages with pnpm only after every check passes.
+The `Release` workflow runs the repository's CI checks once. After CI succeeds, it prepares Changesets and checks database readiness in parallel.
+For a publish, native builds wait for database readiness and smoke-test binaries for all five platforms. The workflow packs the packages with pnpm only after every build and smoke check passes.
 Changesets creates a Git tag named `package@version` and a notes-only GitHub release for each package. GitHub releases have no binary attachments.
 The workflow keeps raw native binaries as Actions artifacts for one day.
 

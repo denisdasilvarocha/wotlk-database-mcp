@@ -1,9 +1,11 @@
 name: Release database
 
 on:
-  push:
-    branches: [main]
-    paths: [data/wotlk.sqlite, src/schema_version.rs]
+  workflow_call:
+    outputs:
+      sha256:
+        description: SHA-256 of the uncompressed SQLite database
+        value: ${{ jobs.release.outputs.sha256 }}
   workflow_dispatch:
 
 permissions:
@@ -15,8 +17,11 @@ concurrency:
 
 jobs:
   release:
+    if: github.repository == 'denisdasilvarocha/wotlk-database-mcp'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
+    outputs:
+      sha256: ${{ steps.inspect.outputs.sha256 }}
     steps:
       - name: Require main branch
         if: github.ref != 'refs/heads/main'
@@ -25,50 +30,95 @@ jobs:
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          lfs: true
+          ref: ${{ github.sha }}
+          lfs: false
           persist-credentials: false
-      - name: Install database tools
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends sqlite3 zstd
-      - name: Validate and package database
-        id: database
+      - name: Inspect database release
+        id: inspect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
           schema=$(sed -nE 's/^pub const SCHEMA_VERSION: u32 = ([0-9]+);$/\1/p' src/schema_version.rs)
           [[ "$schema" =~ ^[0-9]+$ ]]
-          actual=$(sqlite3 data/wotlk.sqlite "SELECT value FROM meta WHERE name = 'schema_version';")
-          [[ "$actual" == "$schema" ]] || { echo "expected schema version $schema, found $actual" >&2; exit 1; }
+          oid=$(git lfs ls-files --json --include=data/wotlk.sqlite HEAD | jq -er '
+            .files | select(length == 1) | .[0] |
+            select(.name == "data/wotlk.sqlite" and .oid_type == "sha256") | .oid |
+            select(type == "string" and test("^[0-9a-f]{64}$"))')
+          tag="db-schema${schema}"
           base="wotlk-db-schema${schema}.sqlite"
-          zstd -19 data/wotlk.sqlite -o "$base.zst"
-          printf '%s  %s\n' "$(sha256sum data/wotlk.sqlite | cut -d ' ' -f 1)" "$base" > "$base.sha256"
-          expected=$(cut -d ' ' -f 1 "$base.sha256")
-          actual=$(zstd -dc "$base.zst" | sha256sum | cut -d ' ' -f 1)
-          [[ "$actual" == "$expected" ]]
-          printf 'tag=db-schema%s\nbase=%s\nschema=%s\n' "$schema" "$base" "$schema" >> "$GITHUB_OUTPUT"
-      - name: Publish immutable schema assets
+          owner=${GH_REPO%/*}
+          name=${GH_REPO#*/}
+          response=$(gh api graphql -f query="query(\$owner: String!, \$name: String!, \$tag: String!) { repository(owner: \$owner, name: \$name) { release(tagName: \$tag) { tagName } } }" -f owner="$owner" -f name="$name" -f tag="$tag")
+          release_exists=$(jq -er --arg tag "$tag" '
+            select((.errors // [] | length) == 0 and (.data.repository | type) == "object") |
+            .data.repository | select(has("release")) | .release |
+            if . == null then "false"
+            elif type == "object" and .tagName == $tag then "true"
+            else error("unexpected release response") end' <<< "$response")
+          publish_required=true
+          if [[ "$release_exists" == true ]]; then
+            temp=$(mktemp -d "${RUNNER_TEMP:?}/database-inspect-XXXXXX")
+            trap 'rm -rf "$temp"' EXIT
+            gh release view "$tag" --json assets --jq '.assets[].name' > "$temp/assets.txt"
+            if grep -Fxq "$base.zst" "$temp/assets.txt" && grep -Fxq "$base.sha256" "$temp/assets.txt"; then
+              gh release download "$tag" --pattern "$base.sha256" --dir "$temp"
+              printf '%s  %s\n' "$oid" "$base" > "$temp/expected.sha256"
+              if cmp -s "$temp/$base.sha256" "$temp/expected.sha256"; then
+                publish_required=false
+                echo "$tag already holds this database; nothing to publish."
+              else
+                echo "::error::$tag already has different or partial database assets. Binaries embed the checksum, so bump SCHEMA_VERSION instead of replacing them." >&2
+                exit 1
+              fi
+            elif grep -Fxq -e "$base.zst" -e "$base.sha256" "$temp/assets.txt"; then
+              echo "::error::$tag already has different or partial database assets. Binaries embed the checksum, so bump SCHEMA_VERSION instead of replacing them." >&2
+              exit 1
+            fi
+          fi
+          printf 'sha256=%s\nschema=%s\ntag=%s\nbase=%s\nrelease-exists=%s\npublish-required=%s\n' \
+            "$oid" "$schema" "$tag" "$base" "$release_exists" "$publish_required" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.inspect.outputs.publish-required == 'true'
+        with:
+          ref: ${{ github.sha }}
+          lfs: true
+          persist-credentials: false
+      - name: Install database tools
+        if: steps.inspect.outputs.publish-required == 'true'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends sqlite3 zstd
+      - name: Validate and package database
+        if: steps.inspect.outputs.publish-required == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ steps.database.outputs.tag }}
-          BASE: ${{ steps.database.outputs.base }}
-          SCHEMA: ${{ steps.database.outputs.schema }}
+          SCHEMA: ${{ steps.inspect.outputs.schema }}
+          BASE: ${{ steps.inspect.outputs.base }}
+          EXPECTED_SHA256: ${{ steps.inspect.outputs.sha256 }}
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --json assets --jq '.assets[].name' > assets.txt; then
-            if grep -Fxq "$BASE.zst" assets.txt && grep -Fxq "$BASE.sha256" assets.txt; then
-              gh release download "$TAG" --pattern "$BASE.sha256" --dir published
-              if cmp -s "published/$BASE.sha256" "$BASE.sha256"; then
-                echo "$TAG already holds this database; nothing to publish."
-                exit 0
-              fi
-            fi
-            if grep -Fxq -e "$BASE.zst" -e "$BASE.sha256" assets.txt; then
-              echo "::error::$TAG already has different or partial database assets. Binaries embed the checksum, so bump SCHEMA_VERSION instead of replacing them." >&2
-              exit 1
-            fi
-          else
-            # Creation also fails on authentication/network errors; never upload to a guessed release.
+          actual=$(sqlite3 data/wotlk.sqlite "SELECT value FROM meta WHERE name = 'schema_version';")
+          [[ "$actual" == "$SCHEMA" ]] || { echo "expected schema version $SCHEMA, found $actual" >&2; exit 1; }
+          expected=$(sha256sum data/wotlk.sqlite | cut -d ' ' -f 1)
+          [[ "$expected" == "$EXPECTED_SHA256" ]] || { echo "hydrated database does not match its LFS identity" >&2; exit 1; }
+          zstd -19 data/wotlk.sqlite -o "$RUNNER_TEMP/$BASE.zst"
+          printf '%s  %s\n' "$expected" "$BASE" > "$RUNNER_TEMP/$BASE.sha256"
+          actual=$(zstd -dc "$RUNNER_TEMP/$BASE.zst" | sha256sum | cut -d ' ' -f 1)
+          [[ "$actual" == "$expected" ]]
+      - name: Publish immutable schema assets
+        if: steps.inspect.outputs.publish-required == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.inspect.outputs.tag }}
+          BASE: ${{ steps.inspect.outputs.base }}
+          SCHEMA: ${{ steps.inspect.outputs.schema }}
+          RELEASE_EXISTS: ${{ steps.inspect.outputs.release-exists }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_EXISTS" == false ]]; then
             gh release create "$TAG" --target "$GITHUB_SHA" --latest=false --title "Database schema ${SCHEMA}" --notes "Immutable database assets for $TAG."
           fi
-          gh release upload "$TAG" "$BASE.zst" "$BASE.sha256"
+          gh release upload "$TAG" "$RUNNER_TEMP/$BASE.zst" "$RUNNER_TEMP/$BASE.sha256"

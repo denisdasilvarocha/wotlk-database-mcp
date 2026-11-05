@@ -9,75 +9,58 @@ on:
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: release-main
   cancel-in-progress: false
 
 jobs:
-  select-mode:
+  verify:
     if: github.repository == 'denisdasilvarocha/wotlk-database-mcp'
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
+
+  prepare:
+    needs: verify
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       mode: ${{ steps.select-mode.outputs.mode }}
       publish-plan-artifact-id: ${{ steps.select-mode.outputs.publish-plan-artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Install Changesets CLI
-        run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: ./.github/actions/setup-packages
       - id: select-mode
         uses: changesets/action/select-mode@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
-
-  version:
-    needs: select-mode
-    if: needs.select-mode.outputs.mode == 'version'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Install Changesets CLI
-        run: pnpm install --frozen-lockfile --ignore-scripts
-      - uses: changesets/action/version@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+      - if: steps.select-mode.outputs.mode == 'version'
+        uses: changesets/action/version@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           script: pnpm run version
-          commit-message: "chore(release): version packages"
-          pr-title: "chore(release): version packages"
+          commit-message: 'chore(release): version packages'
+          pr-title: 'chore(release): version packages'
 
-  verify:
-    needs: select-mode
-    if: needs.select-mode.outputs.mode == 'publish'
-    uses: ./.github/workflows/ci.yml
+  database:
+    needs: verify
+    uses: ./.github/workflows/release-database.yml
     permissions:
-      contents: read
+      contents: write
+
   build-native:
-    needs: select-mode
-    if: needs.select-mode.outputs.mode == 'publish'
+    needs: [prepare, database]
+    if: needs.prepare.outputs.mode == 'publish'
     name: Build and smoke (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
+    env:
+      WOTLK_DB_SHA256: ${{ needs.database.outputs.sha256 }}
     strategy:
       fail-fast: false
       matrix:
@@ -102,93 +85,41 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          package-manager-cache: false
+      - uses: ./.github/actions/setup-packages
       - name: Set up Rust target
         env:
           TARGET: ${{ matrix.target }}
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustup target add "$TARGET"
-      - name: Embed immutable database checksum
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          schema=$(sed -nE 's/^pub const SCHEMA_VERSION: u32 = ([0-9]+);$/\1/p' src/schema_version.rs)
-          [[ "$schema" =~ ^[0-9]+$ ]]
-          tag="db-schema${schema}"
-          base="wotlk-db-schema${schema}.sqlite"
-          assets=$(mktemp)
-          if ! gh release view "$tag" --json assets --jq '.assets[].name' > "$assets" 2>/dev/null; then
-            echo "::error::Database release $tag was not found. Run the Release database workflow from main first." >&2
-            exit 1
-          fi
-          if ! grep -Fxq "$base.zst" "$assets" || ! grep -Fxq "$base.sha256" "$assets"; then
-            echo "::error::Database release $tag must contain both $base.zst and $base.sha256. Run the Release database workflow from main first." >&2
-            exit 1
-          fi
-          checksum_dir=$(mktemp -d)
-          gh release download "$tag" --pattern "$base.sha256" --dir "$checksum_dir"
-          checksum=$(cat "$checksum_dir/$base.sha256")
-          expected_suffix="  $base"
-          hash=${checksum%% *}
-          [[ "$hash" =~ ^[0-9a-f]{64}$ && "$checksum" == "$hash$expected_suffix" ]] || {
-            echo "::error::Invalid checksum asset in database release $tag" >&2
-            exit 1
-          }
-          echo "WOTLK_DB_SHA256=$hash" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-${{ matrix.target }}
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build native binary
         env:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           cargo build --release --locked --target "$TARGET"
-      - name: Stage, pack, and smoke-test launcher and host
-        env:
-          PLATFORM: ${{ matrix.platform }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          binary="target/$TARGET/release/wotlk-database-mcp"
-          if [[ "$RUNNER_OS" == Windows ]]; then binary+=.exe; fi
-          node npm/build.mjs "$PLATFORM=$binary"
-          mkdir -p "$RUNNER_TEMP/npm-packed" "$RUNNER_TEMP/npm-smoke"
-          printf '{"private":true}\n' > "$RUNNER_TEMP/npm-smoke/package.json"
-          pnpm --filter wotlk-database-mcp pack --pack-destination "$RUNNER_TEMP/npm-packed"
-          pnpm --filter "wotlk-database-mcp-$PLATFORM" pack --pack-destination "$RUNNER_TEMP/npm-packed"
-          npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund --offline "$RUNNER_TEMP"/npm-packed/*.tgz
-          node npm/smoke.mjs "$RUNNER_TEMP/npm-smoke"
-      - name: Upload raw native binary for package assembly
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          binary="target/$TARGET/release/wotlk-database-mcp"
-          if [[ "$RUNNER_OS" == Windows ]]; then binary+=.exe; fi
-          mkdir -p "$RUNNER_TEMP/native"
-          cp "$binary" "$RUNNER_TEMP/native/"
+      - uses: ./.github/actions/npm-smoke
+        with:
+          binary: target/${{ matrix.target }}/release/wotlk-database-mcp${{ runner.os == 'Windows' && '.exe' || '' }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-${{ matrix.platform }}
-          path: ${{ runner.temp }}/native/
+          path: target/${{ matrix.target }}/release/wotlk-database-mcp${{ runner.os == 'Windows' && '.exe' || '' }}
           if-no-files-found: error
           retention-days: 1
 
   pack:
-    needs:
-      - select-mode
-      - build-native
-      - verify
+    needs: [prepare, build-native]
+    if: needs.prepare.outputs.mode == 'publish'
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     permissions:
       contents: read
     outputs:
@@ -196,16 +127,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Install Changesets CLI
-        run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: ./.github/actions/setup-packages
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: native-*
@@ -222,7 +146,7 @@ jobs:
       - id: pack
         uses: changesets/action/pack@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          publish-plan-artifact-id: ${{ needs.select-mode.outputs.publish-plan-artifact-id }}
+          publish-plan-artifact-id: ${{ needs.prepare.outputs.publish-plan-artifact-id }}
 
   publish:
     needs: pack
@@ -234,16 +158,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Install Changesets CLI
-        run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: ./.github/actions/setup-packages
       - uses: changesets/action/publish@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           pack-dir-artifact-id: ${{ needs.pack.outputs.pack-dir-artifact-id }}

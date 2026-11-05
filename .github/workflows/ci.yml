@@ -7,12 +7,10 @@ name: CI
 on:
   workflow_call:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -22,7 +20,7 @@ jobs:
   quality:
     name: quality (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 20
     defaults:
       run:
         shell: ${{ matrix.shell }}
@@ -30,17 +28,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             shell: bash
             recipe: check
             tools: just,prek,taplo,cargo-deny,cargo-shear
-          - os: macos-latest
+          - os: macos-15
             shell: bash
             recipe: test
             tools: just
           # Native Windows build with MSYS2 UCRT64. The justfile and test
           # scripts require the MSYS2 Bash environment, not Git Bash or WSL.
-          - os: windows-latest
+          - os: windows-2022
             shell: msys2 {0}
             recipe: test
             tools: just
@@ -123,31 +121,13 @@ jobs:
 
       - name: Check
         run: just ${{ matrix.recipe }}
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Set up packages
+        uses: ./.github/actions/setup-packages
       - name: Test npm packaging
         shell: bash
         run: node --test npm/*.test.mjs
       # `cargo test` already built target/debug for the CLI integration tests.
       - name: Pack, install without scripts, and list MCP tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          platform=$(node -p 'process.platform + "-" + process.arch')
-          binary=target/debug/wotlk-database-mcp
-          if [[ $RUNNER_OS == Windows ]]; then binary+=.exe; fi
-          node npm/build.mjs "$platform=$binary"
-          mkdir -p "$RUNNER_TEMP/npm-packed" "$RUNNER_TEMP/npm-smoke"
-          printf '{"private":true}\n' > "$RUNNER_TEMP/npm-smoke/package.json"
-          pnpm --filter wotlk-database-mcp pack --pack-destination "$RUNNER_TEMP/npm-packed"
-          pnpm --filter "wotlk-database-mcp-$platform" pack --pack-destination "$RUNNER_TEMP/npm-packed"
-          npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund --offline "$RUNNER_TEMP"/npm-packed/*.tgz
-          node npm/smoke.mjs "$RUNNER_TEMP/npm-smoke"
+        uses: ./.github/actions/npm-smoke
+        with:
+          binary: target/debug/wotlk-database-mcp${{ runner.os == 'Windows' && '.exe' || '' }}

@@ -1,0 +1,25 @@
+name: Smoke test npm packages
+description: Pack and exercise the installed native binary
+inputs:
+  binary:
+    description: Path to the native binary
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Pack, install without scripts, and list MCP tools
+      shell: bash
+      env:
+        BINARY: ${{ inputs.binary }}
+      run: |
+        set -euo pipefail
+        root=$(mktemp -d "${RUNNER_TEMP:?}/wotlk-npm-XXXXXX")
+        trap 'status=$?; rm -rf -- "$root" || true; exit "$status"' EXIT
+        mkdir -p "$root/packed" "$root/install"
+        printf '{"private":true}\n' > "$root/install/package.json"
+        platform=$(node -p 'process.platform + "-" + process.arch')
+        node npm/build.mjs "$platform=$BINARY"
+        pnpm --filter wotlk-database-mcp pack --pack-destination "$root/packed"
+        pnpm --filter "wotlk-database-mcp-$platform" pack --pack-destination "$root/packed"
+        npm install --prefix "$root/install" --ignore-scripts --no-audit --no-fund --offline "$root"/packed/*.tgz
+        node npm/smoke.mjs "$root/install"
