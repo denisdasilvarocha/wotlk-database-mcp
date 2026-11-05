@@ -1,0 +1,55 @@
+name: Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  pull-requests: write
+  statuses: read
+
+jobs:
+  merge:
+    if: >-
+      github.repository == 'denisdasilvarocha/wotlk-database-mcp' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # The privileged workflow never checks out or executes pull request code.
+      - name: Merge the tested Dependabot pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          pulls=$(gh api --method GET "repos/$GH_REPO/pulls" \
+            -f state=open -f base=main -f "head=${GH_REPO%%/*}:$HEAD_BRANCH" -F per_page=100)
+          number=$(jq -r --arg sha "$HEAD_SHA" --arg repo "$GH_REPO" '
+            [.[] | select(
+              .user.login == "dependabot[bot]" and
+              .head.sha == $sha and .head.repo.full_name == $repo and
+              .base.repo.full_name == $repo and .base.ref == "main" and
+              .draft == false
+            ) | .number] |
+            if length == 1 then .[0]
+            elif length == 0 then ""
+            else error("multiple matching pull requests") end' <<< "$pulls")
+          if [[ -z "$number" ]]; then
+            echo "No open Dependabot pull request matches the tested commit."
+            exit 0
+          fi
+
+          gh pr checks "$number" --watch --fail-fast
+          gh pr merge "$number" --squash --match-head-commit "$HEAD_SHA"
+
+          # GITHUB_TOKEN merges do not emit a push event that starts Release.
+          gh api --method POST "repos/$GH_REPO/dispatches" -f event_type=dependabot-merged

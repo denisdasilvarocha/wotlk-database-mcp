@@ -5,6 +5,8 @@ name: Release
 on:
   push:
     branches: [main]
+  repository_dispatch:
+    types: [dependabot-merged]
 
 permissions: {}
 
