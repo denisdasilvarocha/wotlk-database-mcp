@@ -41,8 +41,8 @@ jobs:
         uses: changesets/action/version@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           script: pnpm run version
-          commit-message: 'chore(release): version packages'
-          pr-title: 'chore(release): version packages'
+          commit-message: "chore(release): version packages"
+          pr-title: "chore(release): version packages"
 
   database:
     needs: verify
@@ -164,3 +164,32 @@ jobs:
       - uses: changesets/action/publish@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           pack-dir-artifact-id: ${{ needs.pack.outputs.pack-dir-artifact-id }}
+          create-github-releases: false
+          push-git-tags: false
+      - name: Create project release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./npm/package.json").version')
+          notes="${RUNNER_TEMP:?}/project-release.md"
+          node --input-type=module > "$notes" <<'NODE'
+          import { readFileSync } from 'node:fs';
+
+          const manifest = JSON.parse(readFileSync('npm/package.json', 'utf8'));
+          const changelog = readFileSync('npm/CHANGELOG.md', 'utf8');
+          const changes = changelog.split(`## ${manifest.version}\n`)[1]?.split('\n## ')[0].trim();
+          if (!changes) {
+            throw new Error(`Missing launcher changelog entry for ${manifest.version}`);
+          }
+
+          console.log(changes);
+          console.log('\n## Packages\n\nAll packages below are the same MCP release for different platforms.\n');
+          console.log('| Platform | npm package |\n| --- | --- |');
+          for (const name of [manifest.name, ...Object.keys(manifest.optionalDependencies)]) {
+            const platform = name === manifest.name ? 'Launcher' : name.slice(manifest.name.length + 1);
+            console.log(`| ${platform} | [${name}@${manifest.version}](https://www.npmjs.com/package/${name}/v/${manifest.version}) |`);
+          }
+          NODE
+          gh release create "v$version" --target "$GITHUB_SHA" --title "v$version" --notes-file "$notes" --latest

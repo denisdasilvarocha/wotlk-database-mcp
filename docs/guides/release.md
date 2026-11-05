@@ -1,6 +1,6 @@
 # Release the npm packages and database
 
-Use this guide to publish the six npm packages and the matching database assets. Package releases on GitHub contain changelog notes only, not server binaries.
+Use this guide to publish the six npm packages and the matching database assets. One project release on GitHub contains changelog notes and npm links, not server binaries.
 
 ## Prerequisites
 
@@ -71,7 +71,7 @@ Merge the version pull request to start the release workflow.
 
 The `Release` workflow runs the repository's CI checks once. After CI succeeds, it prepares Changesets and checks database readiness in parallel.
 For a publish, native builds wait for database readiness and smoke-test binaries for all five platforms. The workflow packs the packages with pnpm only after every build and smoke check passes.
-Changesets creates a Git tag named `package@version` and a notes-only GitHub release for each package. GitHub releases have no binary attachments.
+The workflow creates one Git tag and notes-only GitHub release named `v<version>` for all six packages. The GitHub release has no binary attachments.
 The workflow keeps raw native binaries as Actions artifacts for one day.
 
 ## Publish the first npm versions
@@ -79,7 +79,8 @@ The workflow keeps raw native binaries as Actions artifacts for one day.
 Publish real packages before configuring npm trusted publishers. Do not publish placeholder packages. A new package must exist on npm before its trusted publisher can be configured.
 
 After the first version pull request is merged, wait for the release run to build all five native binaries. New packages cannot use trusted publishing for their first publish.
-Use a clean checkout of the exact commit shown in that run. Download the raw artifacts before their one-day retention expires. Then stage and publish them:
+Use a clean checkout of the exact commit shown in that run. Download the raw artifacts before their one-day retention expires.
+Run the commands in a live interactive terminal so you can complete npm's browser and passkey approval. If npm offers a five-minute approval window, choose it in npm's prompt. Do not create or use an npm token.
 
 ```sh
 set -euo pipefail
@@ -93,19 +94,31 @@ node npm/build.mjs \
   "linux-arm64=$ARTIFACT_DIR/native-linux-arm64/wotlk-database-mcp" \
   "linux-x64=$ARTIFACT_DIR/native-linux-x64/wotlk-database-mcp" \
   "win32-x64=$ARTIFACT_DIR/native-win32-x64/wotlk-database-mcp.exe"
-pnpm exec changeset publish
-for manifest in npm/package.json npm/platforms/*/package.json; do
-  tag=$(node -p 'const p = require("./" + process.argv[1]); p.name + "@" + p.version' "$manifest")
-  git push origin "refs/tags/$tag"
-done
+pnpm exec changeset publish --git-tag false
 ```
 
 Enter the workflow run ID shown in its GitHub Actions URL when prompted. `npm login` must use an account allowed to publish all six public package names.
 
-`npm/build.mjs` stages the downloaded binaries and the MIT license in the platform packages. `pnpm exec changeset publish` packs the workspaces with pnpm.
+`npm/build.mjs` stages the downloaded binaries and the MIT license in the platform packages. `pnpm exec changeset publish --git-tag false` packs the workspaces with pnpm without creating package tags.
 pnpm resolves their `workspace:*` dependencies to the release versions. Do not use `npm pack` on these workspace packages.
 
-If the failed first publish run did not create GitHub releases, create one for each missing `package@version` tag. Use the matching generated package changelog as its notes. Leave the release assets empty.
+After all six versions are published, create the project release if the workflow did not create it. Copy the section for this version from `npm/CHANGELOG.md` into a notes file. Add links to all six npm packages listed above, including the launcher and its five optional platform dependencies. Choose the notes file path when prompted below.
+
+Verify that the checkout is the source commit for the release run. If the project tag already exists, do not create or move it. Check that it points to that commit before creating a missing release.
+
+```sh
+VERSION=$(node -p "require('./npm/package.json').version")
+COMMIT=$(git rev-parse HEAD)
+RUN_COMMIT=$(gh run view "$RUN_ID" --json headSha --jq .headSha)
+test "$COMMIT" = "$RUN_COMMIT" || { echo "Checkout does not match release run" >&2; exit 1; }
+read -r -p 'Release notes file path: ' NOTES_FILE
+test -f "$NOTES_FILE" || { echo "Notes file not found" >&2; exit 1; }
+git tag "v$VERSION" "$COMMIT"
+git push origin "refs/tags/v$VERSION"
+gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$NOTES_FILE"
+```
+
+This command creates no release assets. Existing legacy `package@version` tags may remain, but do not create new package tags or package releases.
 
 ## Configure trusted publishing
 
@@ -141,6 +154,7 @@ do
   npm view "$name@$VERSION" version
 done
 npm view wotlk-database-mcp dist-tags
+gh release view "v$VERSION"
 ```
 
 Install the published launcher in a clean directory, then run the protocol smoke:
@@ -158,12 +172,20 @@ The smoke starts the installed launcher through `npx` and sends MCP `initialize`
 ## Recover from a partial publish
 
 > [!CAUTION]
-> npm does not allow a package name and version to be published twice. Never delete, move, force-push, or recreate a package Git tag or an immutable database tag.
+> npm does not allow a package name and version to be published twice. Never delete, move, force-push, or recreate a project tag, package tag, or immutable database tag.
 
 For an authentication or network failure, check each exact `package@version` in the registry. Fix the cause and rerun the failed publish job from the same workflow run.
 Changesets skips versions that already exist on npm and publishes only missing package versions. If code or package contents must change, add a changeset and release a new version.
 
-After the retry, check which package tags and GitHub releases exist. Create only missing notes-only releases, using their existing package tags and generated package changelogs. Do not recreate existing tags or attach native binaries.
+After the retry, check whether the `v<version>` project tag and release exist. Preserve all existing tags. If the project release is missing and its tag exists, verify that the tag points to the exact release run commit. Set `VERSION` from `npm/package.json` and `NOTES_FILE` to your notes file path. Use the launcher changelog section and six npm package links as described above. Then create the missing release:
+
+```sh
+VERSION=$(node -p "require('./npm/package.json').version")
+read -r -p 'Release notes file path: ' NOTES_FILE
+gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$NOTES_FILE"
+```
+
+If both tag and release are missing, follow the project release steps above. Do not create package releases or attach native binaries.
 
 ## Related pages
 
