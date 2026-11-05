@@ -217,6 +217,7 @@ See the [tool reference](docs/tools.md) for parameters, examples, relationships,
 The Rust workspace contains the server and the database builder. Install [just](https://just.systems/), then run `just setup` to install missing development tools and hooks. The setup script supports macOS, Linux with apt, dnf or pacman, and Windows through MSYS2 UCRT64. It may install system packages and Rust tools.
 
 ```bash
+just setup
 just build
 just run
 ```
