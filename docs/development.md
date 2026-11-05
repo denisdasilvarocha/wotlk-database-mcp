@@ -38,7 +38,8 @@ Run `just run` to start the server with the built database, or `just inspect` to
 | `just test` | Run workspace tests and database build script tests. |
 | `just doc` | Build Rust API documentation with warnings denied. |
 | `just deps` | Check dependency advisories, licenses, sources, and unused dependencies. |
-| `just check` | Run all configured gates. |
+| `just check` | Run all hooks at the manual stage. |
+| `node --test npm/*.test.mjs` | Run the npm packaging tests separately with Node.js. |
 
 Run `just --list` for all recipes. The root [justfile](../justfile) defines their commands.
 

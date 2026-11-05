@@ -89,6 +89,8 @@ Follow the prompts to select the tools and save the server.
 <details>
 <summary>OpenClaw</summary>
 
+If the local gateway is running, stop it before registration and start it again afterward.
+
 ```bash
 openclaw mcp add wotlk-database --command npx --arg -y --arg wotlk-database-mcp
 ```
@@ -222,7 +224,7 @@ just build
 just run
 ```
 
-`just build` prepares the pinned inputs, builds `data/wotlk.sqlite`, and compiles the release server. `just run` starts the server with that database on stdio. Run `just test` for tests or `just check` for all project gates. See the [development guide](docs/development.md) for prerequisites and individual commands.
+`just build` prepares the pinned inputs, builds `data/wotlk.sqlite`, and compiles the release server. `just run` starts the server with that database on stdio. Run `just test` for workspace and database build script tests, or `just check` for the full hook suite. See the [development guide](docs/development.md) for prerequisites and the separate npm packaging check.
 
 ### Documentation
 
