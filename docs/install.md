@@ -6,7 +6,7 @@ Install Node.js 22 or later and use an MCP client that launches stdio servers. T
 
 Keep optional dependencies enabled when installing the package; they contain the native executables.
 
-Configure your client to run `npx` with arguments `-y` and `wotlk-database-mcp`. Client configuration locations and formats differ; the [README](../README.md#quick-start) shows a common JSON format. See the [npm documentation](https://docs.npmjs.com/cli/v11/commands/npx/) for how `npx` runs packages.
+Configure your client to run `npx` with arguments `-y` and `wotlk-database-mcp`. Client configuration locations and formats differ; open Other in the [README](../README.md#ai-agents) for a common JSON format. See the [npm documentation](https://docs.npmjs.com/cli/v11/commands/npx/) for how `npx` runs packages.
 
 ## Select a database
 

@@ -3,7 +3,7 @@
 <p align="center">
   <a href="#features">Features</a> ·
   <a href="#prerequisites">Prerequisites</a> ·
-  <a href="#quick-start">Quick start</a> ·
+  <a href="#install">Install</a> ·
   <a href="#usage">Usage</a> ·
   <a href="#development">Development</a> ·
   <a href="#documentation">Documentation</a> ·
@@ -32,14 +32,128 @@ The database combines client DBC data, TrinityCore world data, and vendored Lua 
 ## Prerequisites
 
 - An MCP client that supports [stdio transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#stdio).
-- Node.js 22 or later for the npm launcher. Native packages support macOS and Linux on x64 and ARM64, and Windows on x64. Linux requires glibc.
-- Internet access for the first database download, unless you supply a compatible local database.
+- Node 22 or later. Native packages support macOS and Linux, Windows.
 
-## Quick start
+## Install
 
-Add this server to your MCP client's configuration, using the format required by your client:
+Run the command for your client in a terminal.
 
-```json
+<details>
+<summary>Codex</summary>
+
+```bash
+codex mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp).
+
+</details>
+
+<details>
+<summary>Claude Code</summary>
+
+```bash
+claude mcp add --transport stdio --scope user wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
+
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+The Cursor CLI shares its MCP configuration with the editor:
+
+```bash
+agent mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[Cursor MCP documentation](https://cursor.com/docs/integrations/xcode).
+
+</details>
+
+<details>
+<summary>Hermes Agent</summary>
+
+```bash
+hermes mcp add wotlk-database --command npx --args -y wotlk-database-mcp
+```
+
+Follow the prompts to select the tools and save the server.
+
+[Hermes Agent MCP documentation](https://hermes-agent.nousresearch.com/docs/reference/cli-commands#hermes-mcp).
+
+</details>
+
+<details>
+<summary>OpenClaw</summary>
+
+```bash
+openclaw mcp add wotlk-database --command npx --arg -y --arg wotlk-database-mcp
+```
+
+[OpenClaw MCP documentation](https://docs.openclaw.ai/cli/mcp/registry).
+
+</details>
+
+<details>
+<summary>OpenCode</summary>
+
+In OpenCode v2, run this from your project:
+
+```bash
+opencode mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+Add `--global` before `--` to make the server available in every project. For OpenCode v1, run `opencode mcp add` and follow the prompts for a local server named `wotlk-database` with the command `npx -y wotlk-database-mcp`.
+
+[OpenCode MCP documentation](https://dev.opencode.ai/v2/docs/mcp-servers/).
+
+</details>
+
+<details>
+<summary>Pi</summary>
+
+Pi 0.99.0 or later includes MCP support:
+
+```bash
+pi mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[Pi MCP documentation](https://pi.dev/docs/latest/mcp).
+
+</details>
+
+<details>
+<summary>Oh My Pi (OMP)</summary>
+
+Start `omp`, then run `/mcp add` in the session. In the setup wizard, use the name `wotlk-database`, choose stdio, enter `npx` as the command and `-y wotlk-database-mcp` as the arguments, and select your preferred scope.
+
+[Oh My Pi (OMP) MCP documentation](https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md).
+
+</details>
+
+<details>
+<summary>GitHub Copilot CLI</summary>
+
+```bash
+copilot mcp add wotlk-database -- npx -y wotlk-database-mcp
+```
+
+[GitHub Copilot CLI MCP documentation](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers).
+
+</details>
+
+<details>
+<summary>Other</summary>
+
+Give your agent this prompt to configure the server for its MCP client:
+
+```text
+Install and configure the WotLK Database MCP server for this agent. Preserve my
+existing MCP servers and adapt this stdio configuration to the client's format:
+
 {
   "mcpServers": {
     "wotlk-database": {
@@ -48,9 +162,15 @@ Add this server to your MCP client's configuration, using the format required by
     }
   }
 }
+
+Reload the MCP configuration if needed, then verify the server connects and
+list its available tools.
 ```
 
-Restart or reconnect the client, then ask it to search the WotLK database for an item or spell. On the first run, the server downloads and verifies the database in the background and stores it in a versioned platform cache. If a tool reports download progress, retry after the download finishes.
+</details>
+
+> [!NOTE]
+> Restart or reconnect the client, then ask it to search the WotLK database for an item or spell. On the first run, the server downloads and verifies the database in the background and stores it in a versioned platform cache. If a tool reports download progress, retry after the download finishes.
 
 To prepare the cache before connecting, run:
 
