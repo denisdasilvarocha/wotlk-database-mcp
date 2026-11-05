@@ -38,6 +38,17 @@ Run `just run` to start the server with the built database, or `just inspect` to
 | `just test` | Run workspace tests and database build script tests. |
 | `just doc` | Build Rust API documentation with warnings denied. |
 | `just deps` | Check dependency advisories, licenses, sources, and unused dependencies. |
-| `just check` | Run all configured gates. |
+| `just check` | Run all hooks at the manual stage. |
+| `node --test npm/*.test.mjs` | Run the npm packaging tests separately with Node.js. |
 
 Run `just --list` for all recipes. The root [justfile](../justfile) defines their commands.
+
+## Configure Dependabot auto-merge
+
+Create an active branch ruleset for `main`. Enable **Require status checks to pass** and **Require branches to be up to date before merging**. Select the GitHub Actions checks `quality (ubuntu-24.04)`, `quality (macos-15)`, and `quality (windows-2022)`. Keep GitHub Actions subject to the ruleset. [GitHub branch rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging)
+
+Dependabot auto-merge skips merges until the strict ruleset is active.
+
+If GitHub rejects a merge because the Dependabot branch is behind `main`, comment `@dependabot rebase` on the pull request and wait for CI on the new head. [Dependabot commands](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-pull-request-comment-commands)
+
+If a release dispatch fails after a bot merge, rerun the **Dependabot auto-merge** workflow to retry the dispatch.

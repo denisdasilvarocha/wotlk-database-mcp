@@ -1,4 +1,4 @@
-use std::fmt::Write;
+use std::{collections::HashMap, fmt::Write};
 
 use rusqlite::{Connection, Statement, params};
 
@@ -182,20 +182,118 @@ impl<'conn> Importer<'conn> {
 }
 
 const VENDOR_WALK: &str = "
-    WITH RECURSIVE walk(root, slot, item, max_count, restock_time, extended_cost, cost, line, path, cycle) AS (
-        SELECT entry, slot, item, max_count, restock_time, extended_cost, cost, line,
-               ',' || entry || ',',
-               item < 0 AND -item = entry
+    WITH RECURSIVE walk(root, slot, item, max_count, restock_time, extended_cost, cost) AS (
+        SELECT entry, slot, item, max_count, restock_time, extended_cost, cost
         FROM vendor_import
         UNION ALL
         SELECT walk.root, walk.slot, child.item, child.max_count, child.restock_time,
-               child.extended_cost, child.cost, child.line,
-               walk.path || child.entry || ',',
-               child.item < 0 AND instr(walk.path || child.entry || ',', ',' || -child.item || ',') > 0
+               child.extended_cost, child.cost
         FROM walk JOIN vendor_import child ON child.entry = -walk.item
-        WHERE walk.item < 0 AND NOT walk.cycle
+        WHERE walk.item < 0
     )
 ";
+
+// TDB 335.26091 needs 37,560 visits. Count intermediate rows as well as stock so
+// empty, missing and repeated references cannot bypass the expansion budget.
+const MAX_VENDOR_WALK_ROWS: i64 = 1_000_000;
+
+#[derive(Debug)]
+struct VendorExpansion {
+    walk_rows: i64,
+    references_left: usize,
+    dependents: Vec<(usize, u64)>,
+    line: u64,
+}
+
+fn validate_vendor_expansion(conn: &Connection, max_rows: i64) -> Result<(), BuildError> {
+    let too_large = |line| BuildError::Dump {
+        line,
+        message: format!("vendor reference expansion exceeds {max_rows} rows"),
+    };
+    let line_number = |value: i64| {
+        u64::try_from(value).map_err(|_| BuildError::Dump {
+            line: 0,
+            message: "vendor line number out of range".into(),
+        })
+    };
+    let source_rows: i64 = conn.query_row("SELECT COUNT(*) FROM vendor_import", [], |row| row.get(0))?;
+    if source_rows > max_rows {
+        return Err(too_large(0));
+    }
+
+    let mut vendors = Vec::new();
+    let mut indices = HashMap::new();
+    let mut statement = conn.prepare("SELECT entry, COUNT(*), MIN(line) FROM vendor_import GROUP BY entry")?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        indices.insert(row.get::<_, i64>(0)?, vendors.len());
+        vendors.push(VendorExpansion {
+            walk_rows: row.get(1)?,
+            references_left: 0,
+            dependents: Vec::new(),
+            line: line_number(row.get(2)?)?,
+        });
+    }
+
+    let mut statement = conn.prepare("SELECT entry, -item, line FROM vendor_import WHERE item < 0")?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let source = indices[&row.get::<_, i64>(0)?];
+        let Some(&target) = indices.get(&row.get::<_, i64>(1)?) else {
+            // The SQL join emits no children for a reference to a missing vendor.
+            continue;
+        };
+        vendors[source].references_left += 1;
+        vendors[target].dependents.push((source, line_number(row.get(2)?)?));
+    }
+
+    let mut ready: Vec<_> = vendors
+        .iter()
+        .enumerate()
+        .filter_map(|(index, vendor)| (vendor.references_left == 0).then_some(index))
+        .collect();
+    let mut total_rows = 0_i64;
+    while let Some(index) = ready.pop() {
+        let walk_rows = vendors[index].walk_rows;
+        total_rows = total_rows.saturating_add(walk_rows);
+        if total_rows > max_rows {
+            return Err(too_large(vendors[index].line));
+        }
+        // Resolve each edge once, including duplicates. Reusing a child's count
+        // avoids enumerating all the paths that reach it through a shared graph.
+        for (parent, _) in std::mem::take(&mut vendors[index].dependents) {
+            let vendor = &mut vendors[parent];
+            vendor.walk_rows = vendor.walk_rows.saturating_add(walk_rows);
+            if vendor.walk_rows > max_rows {
+                return Err(too_large(vendor.line));
+            }
+            vendor.references_left -= 1;
+            if vendor.references_left == 0 {
+                ready.push(parent);
+            }
+        }
+    }
+    if let Some(mut index) = vendors.iter().position(|vendor| vendor.references_left != 0) {
+        // Each unresolved vendor still points to another unresolved vendor.
+        // Follow one such reference per vendor until an edge closes the cycle.
+        let mut references = vec![None; vendors.len()];
+        for (target, vendor) in vendors.iter().enumerate() {
+            for &(source, line) in &vendor.dependents {
+                references[source] = Some((target, line));
+            }
+        }
+        let mut line = 0;
+        while let Some((target, reference_line)) = references[index].take() {
+            line = reference_line;
+            index = target;
+        }
+        return Err(BuildError::Dump {
+            line,
+            message: "cyclic vendor reference (cycle detected)".into(),
+        });
+    }
+    Ok(())
+}
 
 pub(super) fn initialize(conn: &Connection) -> Result<(), BuildError> {
     conn.execute_batch(
@@ -209,19 +307,7 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), BuildError> {
 }
 
 pub(super) fn finalize(conn: &Connection) -> Result<(), BuildError> {
-    use rusqlite::OptionalExtension;
-
-    let mut cycles = conn.prepare(&format!("{VENDOR_WALK} SELECT line FROM walk WHERE cycle LIMIT 1"))?;
-    if let Some(line) = cycles.query_row([], |row| row.get::<_, i64>(0)).optional()? {
-        let line = u64::try_from(line).map_err(|_| BuildError::Dump {
-            line: 0,
-            message: "vendor line number out of range".into(),
-        })?;
-        return Err(BuildError::Dump {
-            line,
-            message: "cyclic vendor reference (cycle detected)".into(),
-        });
-    }
+    validate_vendor_expansion(conn, MAX_VENDOR_WALK_ROWS)?;
     let mut insert = conn.prepare(&format!(
         "{VENDOR_WALK}
          INSERT INTO vendor (creature_id, slot, item_id, max_count, restock_time, extended_cost, cost)
@@ -230,4 +316,50 @@ pub(super) fn finalize(conn: &Connection) -> Result<(), BuildError> {
     insert.execute([])?;
     conn.execute_batch("DROP TABLE vendor_import")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expansion_budget_counts_duplicate_edges_and_all_roots() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        conn.execute_batch("INSERT INTO vendor_import (entry, item, line) VALUES (1,-2,1),(1,-2,2),(2,42,3);")
+            .unwrap();
+
+        validate_vendor_expansion(&conn, 5).unwrap();
+        let error = validate_vendor_expansion(&conn, 4).unwrap_err();
+
+        assert!(error.to_string().contains("expansion exceeds 4 rows"), "{error}");
+    }
+
+    #[test]
+    fn expansion_budget_counts_rows_without_stock() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        conn.execute_batch("INSERT INTO vendor_import (entry, item, line) VALUES (1,0,1),(1,-2,2),(3,-1,3);")
+            .unwrap();
+
+        validate_vendor_expansion(&conn, 5).unwrap();
+        let error = validate_vendor_expansion(&conn, 4).unwrap_err();
+
+        assert!(error.to_string().contains("expansion exceeds 4 rows"), "{error}");
+    }
+
+    #[test]
+    fn reports_a_reference_row_inside_the_vendor_cycle() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        conn.execute_batch("INSERT INTO vendor_import (entry, item, line) VALUES (1,42,1),(1,-2,2),(2,-3,3),(3,-2,4);")
+            .unwrap();
+
+        let error = validate_vendor_expansion(&conn, 10).unwrap_err();
+
+        assert!(
+            matches!(&error, BuildError::Dump { line: 3 | 4, message } if message.contains("cyclic vendor reference")),
+            "{error}"
+        );
+    }
 }
