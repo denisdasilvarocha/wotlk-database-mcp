@@ -4,7 +4,7 @@ The server exposes these tools through MCP. The examples show the JSON argument 
 
 ## Search
 
-`search` finds names case-insensitively, including prefix matches. `kind` is optional. `limit` defaults to 20 and accepts 1–100.
+`search` finds names case-insensitively, including prefix matches. `kind` is optional. `limit` defaults to 20 and accepts 1 to 100.
 
 ```json
 {"text": "Frostbolt", "kind": "spell", "limit": 10}
@@ -27,7 +27,7 @@ Use `{"kind": "meta"}` without an ID for build provenance. The other kinds are:
 
 ## Follow relationships
 
-`related` takes `kind`, `id`, and `relation`; `limit` defaults to 50 and accepts 1–1000. If the results exceed the limit, a final line reports how many rows are shown and the total.
+`related` takes `kind`, `id`, and `relation`; `limit` defaults to 50 and accepts 1 to 1000. If the results exceed the limit, a final line reports how many rows are shown and the total.
 
 ```json
 {"kind": "item", "id": 19017, "relation": "dropped_by"}
@@ -46,7 +46,7 @@ Use `{"kind": "meta"}` without an ID for build provenance. The other kinds are:
 
 ## Query SQLite
 
-`sql` accepts one read-only SQLite statement. `limit` defaults to 200 and accepts 1–1000; queries have a two-second limit. Results are tab-separated. Pragma assignments and transactions are rejected.
+`sql` accepts one read-only SQLite statement. `limit` defaults to 200 and accepts 1 to 1000; queries have a two-second limit. Results are tab-separated. Pragma assignments and transactions are rejected.
 
 ```json
 {"query": "SELECT sql FROM sqlite_schema WHERE name = 'item'"}

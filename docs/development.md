@@ -26,7 +26,7 @@ This validates or prepares the vendored offsets and Lua API data, downloads pinn
 
 To build only the database, run `just build-db`.
 
-Run against the built database with `just run`, or open the MCP Inspector with `just inspect` (requires Node.js). Both start the server on stdio. `just run` explicitly selects `data/wotlk.sqlite`; the default runtime cache is separate.
+Run `just run` to start the server with the built database, or `just inspect` to open the MCP Inspector (requires Node.js). Both start the server on stdio. `just run` explicitly selects `data/wotlk.sqlite`; the default runtime cache is separate.
 
 ## Check changes
 
@@ -40,4 +40,4 @@ Run against the built database with `just run`, or open the MCP Inspector with `
 | `just deps` | Check dependency advisories, licenses, sources, and unused dependencies. |
 | `just check` | Run all configured gates. |
 
-Run `just --list` for all recipes. The root [justfile](../justfile) is the source of truth for their commands.
+Run `just --list` for all recipes. The root [justfile](../justfile) defines their commands.

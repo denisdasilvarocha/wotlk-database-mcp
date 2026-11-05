@@ -86,7 +86,7 @@ Your MCP client can use these tools to answer questions such as:
 - What are the stats for Thunderfury, Blessed Blade of the Windseeker?
 - Where does Ragnaros spawn, and what loot can it drop?
 - What are the rewards and follow-up quests for The Missing Diplomat?
-- Whats the SpellId for Frostbolt Rank 3?
+- What is the spell ID for Frostbolt rank 3?
 - What does `UnitHealth` return?
 - What is the offset for `FrameScript::Execute`?
 
