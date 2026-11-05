@@ -4,6 +4,7 @@ mod common;
 
 use rusqlite::{Connection, params, types::FromSql};
 use std::{
+    fmt::Write,
     fs,
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -107,6 +108,108 @@ fn rejects_cyclic_vendor_references_without_leaving_output() {
     inputs.tdb = dir.join("vendor-cycle.sql");
     fs::write(&inputs.tdb, dump).unwrap();
     assert_failure(&inputs, &dir, "cyclic vendor reference");
+}
+
+#[test]
+fn rejects_branching_vendor_references_and_preserves_existing_output() {
+    let (dir, mut inputs) = inputs("builder-vendor-branching");
+    let mut dump = fs::read_to_string(&inputs.tdb).unwrap();
+    // Only 70 rows, but more than 1.5 million recursive visits across all roots.
+    for layer in 0..18 {
+        for vendor in [10000 + layer * 2, 10001 + layer * 2] {
+            if layer == 17 {
+                write!(&mut dump, "\nINSERT INTO `npc_vendor` VALUES ({vendor},0,4002,0,0,0);").unwrap();
+            } else {
+                let next = 10000 + (layer + 1) * 2;
+                write!(
+                    &mut dump,
+                    "\nINSERT INTO `npc_vendor` VALUES ({vendor},0,-{next},0,0,0),({vendor},1,-{},0,0,0);",
+                    next + 1
+                )
+                .unwrap();
+            }
+        }
+    }
+    inputs.tdb = dir.join("vendor-branching.sql");
+    fs::write(&inputs.tdb, dump).unwrap();
+    let out = dir.join("out.sqlite");
+    fs::write(&out, b"existing database").unwrap();
+
+    let error = build(&inputs, &out).expect_err("excessive vendor expansion must fail");
+
+    assert!(
+        error.to_string().contains("vendor reference expansion exceeds"),
+        "{error}"
+    );
+    assert_eq!(fs::read(&out).unwrap(), b"existing database");
+    assert!(!dir.join("out.sqlite.partial").exists());
+}
+
+#[test]
+fn rejects_excessively_deep_vendor_references() {
+    let (dir, mut inputs) = inputs("builder-vendor-deep");
+    let mut dump = fs::read_to_string(&inputs.tdb).unwrap();
+    for vendor in 10000..11500 {
+        write!(
+            &mut dump,
+            "\nINSERT INTO `npc_vendor` VALUES ({vendor},0,-{},0,0,0);",
+            vendor + 1
+        )
+        .unwrap();
+    }
+    dump.push_str("\nINSERT INTO `npc_vendor` VALUES (11500,0,4002,0,0,0);");
+    inputs.tdb = dir.join("vendor-deep.sql");
+    fs::write(&inputs.tdb, dump).unwrap();
+
+    assert_failure(&inputs, &dir, "vendor reference expansion exceeds");
+}
+
+#[test]
+fn shared_vendor_references_preserve_slots_and_stock() {
+    let (dir, mut inputs) = inputs("builder-vendor-shared");
+    let mut dump = fs::read_to_string(&inputs.tdb).unwrap();
+    dump.push_str(
+        "\nINSERT INTO `npc_vendor` VALUES
+         (6000,7,-6001,0,0,0),(6000,9,-6002,0,0,0),
+         (6001,5,-6003,0,0,0),(6002,5,-6003,0,0,0),
+         (6003,2,4002,3,60,1),
+         (6004,1,-6003,0,0,0),(6004,2,-6003,0,0,0),
+         (6005,0,-999999,0,0,0),(6005,1,0,0,0,0);",
+    );
+    inputs.tdb = dir.join("vendor-shared.sql");
+    fs::write(&inputs.tdb, dump).unwrap();
+    let out = dir.join("out.sqlite");
+
+    build(&inputs, &out).unwrap();
+
+    let conn = Connection::open(out).unwrap();
+    let mut statement = conn
+        .prepare("SELECT creature_id, slot, item_id, max_count, restock_time, extended_cost, cost FROM vendor WHERE creature_id IN (6000,6004,6005) ORDER BY creature_id, slot")
+        .unwrap();
+    let stock = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        stock,
+        vec![
+            (6000, 7, 4002, 3, 60, 1, "honor:100,4002x2".into()),
+            (6000, 9, 4002, 3, 60, 1, "honor:100,4002x2".into()),
+            (6004, 1, 4002, 3, 60, 1, "honor:100,4002x2".into()),
+            (6004, 2, 4002, 3, 60, 1, "honor:100,4002x2".into()),
+        ]
+    );
 }
 
 /// Builds one database from the fixtures with a spell family and icon rows that
