@@ -30,7 +30,7 @@ rmcp = { version = "3.8.0", features = ["client"] }
 tokio = { version = "1.54.1", features = ["io-util", "time"] }
 wotlk-db-builder = { version = "0.1.0", path = "builder" }
 wow_dbc = { version = "0.3.0", features = ["wrath"] }
-wow_world_base = { version = "0.2.0", features = ["wrath"] }
+wow_world_base = { version = "0.3.0", features = ["wrath"] }
 
 [lints]
 workspace = true

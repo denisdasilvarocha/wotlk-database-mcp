@@ -991,7 +991,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1253,7 +1253,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1932,7 +1932,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2092,7 +2092,7 @@ dependencies = [
  "tracing-subscriber",
  "wotlk-db-builder",
  "wow_dbc",
- "wow_world_base",
+ "wow_world_base 0.3.0",
  "zstd",
 ]
 
@@ -2117,7 +2117,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b265259b30d9a8b873150d09f8114038eb96800bd7f4c6c07d027be6d9e1f237"
 dependencies = [
- "wow_world_base",
+ "wow_world_base 0.2.0",
 ]
 
 [[package]]
@@ -2125,6 +2125,12 @@ name = "wow_world_base"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81a9bbbfb34f4898a407a865e95be8bbee685a567df3423fbecb8ffd42fb117a"
+
+[[package]]
+name = "wow_world_base"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3e7f722a488637c33c707dc29de57a12908eba56b3f07db69ee476d1f7f3f8f"
 
 [[package]]
 name = "writeable"
